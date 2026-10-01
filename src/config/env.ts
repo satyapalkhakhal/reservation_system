@@ -30,8 +30,27 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
+const DbEnvSchema = EnvSchema.pick({
+  DATABASE_URL: true,
+  DATABASE_SSL: true,
+  DB_POOL_MAX: true,
+  DB_POOL_ACQUIRE_TIMEOUT_MS: true,
+  DB_LOCK_TIMEOUT_MS: true,
+  DB_STATEMENT_TIMEOUT_MS: true,
+});
+export type DbEnv = z.infer<typeof DbEnvSchema>;
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = EnvSchema.safeParse(source);
+  return parseOrThrow(EnvSchema, source);
+}
+
+/** Only the database settings (used by the migration CLI). */
+export function loadDbEnv(source: NodeJS.ProcessEnv = process.env): DbEnv {
+  return parseOrThrow(DbEnvSchema, source);
+}
+
+function parseOrThrow<S extends z.ZodType>(schema: S, source: NodeJS.ProcessEnv): z.infer<S> {
+  const parsed = schema.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Invalid environment configuration:\n${issues}`);
