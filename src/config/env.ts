@@ -11,7 +11,11 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  DATABASE_SSL: booleanString.default(false),
+  // disable: plain TCP (local/compose, private networks)
+  // verify:  TLS with certificate verification (system CAs, or DATABASE_CA_CERT)
+  // no-verify: TLS without verification; explicit opt-in only, never the default
+  DATABASE_SSL_MODE: z.enum(['disable', 'verify', 'no-verify']).default('disable'),
+  DATABASE_CA_CERT: z.string().optional(),
   DB_POOL_MAX: z.coerce.number().int().positive().default(20),
   // How long a request may wait for a free pool connection before we answer 503.
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
@@ -32,7 +36,8 @@ export type Env = z.infer<typeof EnvSchema>;
 
 const DbEnvSchema = EnvSchema.pick({
   DATABASE_URL: true,
-  DATABASE_SSL: true,
+  DATABASE_SSL_MODE: true,
+  DATABASE_CA_CERT: true,
   DB_POOL_MAX: true,
   DB_POOL_ACQUIRE_TIMEOUT_MS: true,
   DB_LOCK_TIMEOUT_MS: true,

@@ -15,7 +15,7 @@ export type PoolClient = pg.PoolClient;
 export function createPool(env: DbEnv): pg.Pool {
   return new pg.Pool({
     connectionString: env.DATABASE_URL,
-    ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : undefined,
+    ssl: sslConfig(env),
     max: env.DB_POOL_MAX,
     // Also bounds how long a request waits in the pool queue for a client.
     connectionTimeoutMillis: env.DB_POOL_ACQUIRE_TIMEOUT_MS,
@@ -25,4 +25,15 @@ export function createPool(env: DbEnv): pg.Pool {
     idle_in_transaction_session_timeout: 30_000,
     application_name: 'seat-reservation',
   });
+}
+
+function sslConfig(env: DbEnv): pg.PoolConfig['ssl'] {
+  switch (env.DATABASE_SSL_MODE) {
+    case 'disable':
+      return undefined;
+    case 'verify':
+      return { rejectUnauthorized: true, ...(env.DATABASE_CA_CERT ? { ca: env.DATABASE_CA_CERT } : {}) };
+    case 'no-verify':
+      return { rejectUnauthorized: false };
+  }
 }
