@@ -4,6 +4,9 @@ import type { Pool } from './db/pool.js';
 import { registerErrorHandler } from './common/errors/error-handler.js';
 import { ShowService } from './modules/shows/service.js';
 import { showRoutes } from './modules/shows/routes.js';
+import { JwtAuthService } from './modules/auth/service.js';
+import { requireAuth } from './modules/auth/middleware.js';
+import { devTokenRoutes } from './modules/auth/routes.js';
 
 export interface AppDeps {
   env: Env;
@@ -16,11 +19,17 @@ export async function buildApp({ env, pool }: AppDeps): Promise<FastifyInstance>
   });
 
   registerErrorHandler(app);
+  app.decorateRequest('authUser', null);
 
+  const auth = new JwtAuthService(env.JWT_SECRET, env.JWT_ISSUER, env.JWT_TTL_SECONDS);
+  const authenticate = requireAuth(auth);
   const shows = new ShowService(pool, env.PER_USER_LIMIT);
 
   app.get('/health/live', async () => ({ status: 'ok' }));
-  await app.register(showRoutes, { shows });
+  if (env.AUTH_DEV_TOKENS_ENABLED) {
+    await app.register(devTokenRoutes, { auth });
+  }
+  await app.register(showRoutes, { shows, authenticate });
 
   return app;
 }

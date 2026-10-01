@@ -1,16 +1,20 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
 import { parseOrThrow } from '../../common/utils/validation.js';
 import { CreateShowBody, ShowIdParams } from './schemas.js';
 import type { ShowService } from './service.js';
 
-export async function showRoutes(app: FastifyInstance, opts: { shows: ShowService }): Promise<void> {
-  const { shows } = opts;
+export async function showRoutes(
+  app: FastifyInstance,
+  opts: { shows: ShowService; authenticate: preHandlerAsyncHookHandler },
+): Promise<void> {
+  const { shows, authenticate } = opts;
 
-  app.post('/shows', async (request, reply) => {
+  // Any authenticated caller may create shows (roles are out of scope).
+  app.post('/shows', { preHandler: authenticate }, async (request, reply) => {
     const body = parseOrThrow(CreateShowBody, request.body);
     const show = await shows.createShow(body);
     request.log.info(
-      { event: 'show_created', show_id: show.id, total_seats: show.total_seats },
+      { event: 'show_created', show_id: show.id, total_seats: show.total_seats, user_id: request.authUser?.id },
       'show created',
     );
     return reply.status(201).send(show);
