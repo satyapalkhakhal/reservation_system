@@ -120,6 +120,7 @@ All configuration is via environment variables, validated at startup (the proces
 | `DATABASE_URL` | **required** | PostgreSQL connection string |
 | `DATABASE_SSL_MODE` | `disable` | `disable` \| `verify` (TLS + cert verification) \| `no-verify` (explicit opt-in only) |
 | `DATABASE_CA_CERT` | – | PEM CA bundle for `verify` with a private CA |
+| `LISTEN_BACKLOG` | `4096` | HTTP accept-queue size (Node default 511 overflows under connection bursts behind a proxy) |
 | `DB_POOL_MAX` | `20` | Request pool size |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS` | `30000` | Max wait for a pool connection before answering `503` |
 | `DB_LOCK_TIMEOUT_MS` | `10000` | PostgreSQL `lock_timeout` (→ `503`, never a hang) |

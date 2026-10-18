@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
   process.once('SIGINT', () => void shutdown('SIGINT'));
 
-  await app.listen({ port: env.PORT, host: env.HOST });
+  await app.listen({ port: env.PORT, host: env.HOST, backlog: env.LISTEN_BACKLOG });
 }
 
 main().catch((err: unknown) => {

@@ -4,5 +4,14 @@
 # 80 + 443 must be reachable.
 {$DOMAIN} {
 	encode gzip
-	reverse_proxy app:3000
+	reverse_proxy app:3000 {
+		transport http {
+			# Reuse upstream connections instead of opening a new one per
+			# request under bursts (Caddy's default keeps only 32 idle).
+			keepalive_idle_conns_per_host 1024
+			# Below Node/Fastify's 72s keep-alive timeout, so Caddy never
+			# reuses a connection the app is about to close.
+			keepalive 60s
+		}
+	}
 }

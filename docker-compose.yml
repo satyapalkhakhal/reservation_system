@@ -38,6 +38,9 @@ services:
       AUTH_DEV_TOKENS_ENABLED: ${AUTH_DEV_TOKENS_ENABLED:-true}
     ports:
       - "${APP_HOST_PORT:-3000}:3000"
+    # Room for connection bursts (pairs with LISTEN_BACKLOG, default 4096).
+    sysctls:
+      - net.core.somaxconn=4096
     restart: unless-stopped
 
 volumes:

@@ -8,6 +8,10 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
+  // Kernel accept-queue size for the HTTP listener (Node defaults to 511).
+  // Bursts of new connections beyond it are dropped by the kernel and surface
+  // as connection resets / 502s at the proxy. Capped by net.core.somaxconn.
+  LISTEN_BACKLOG: z.coerce.number().int().positive().default(4096),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
