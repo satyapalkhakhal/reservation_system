@@ -12,19 +12,26 @@ import { reservationRoutes } from './modules/reservations/routes.js';
 import { healthRoutes } from './modules/health/routes.js';
 import { createMetrics } from './observability/metrics.js';
 import { metricsPlugin } from './observability/http-metrics.js';
+import { loggerOptions, registerRequestLogging } from './observability/logger.js';
 
 export interface AppDeps {
   env: Env;
   pool: Pool;
   /** Separate small pool for readiness checks. Defaults to `pool`. */
   healthPool?: Pool;
+  /** Override log destination (tests capture log lines). */
+  logStream?: { write(line: string): void };
 }
 
-export async function buildApp({ env, pool, healthPool }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ env, pool, healthPool, logStream }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: { level: env.LOG_LEVEL },
+    ...loggerOptions(env, logStream),
+    // Behind a load balancer/proxy (Render, Fly, etc.): honour X-Forwarded-*.
+    trustProxy: true,
+    bodyLimit: 256 * 1024,
   });
 
+  registerRequestLogging(app);
   registerErrorHandler(app);
   app.decorateRequest('authUser', null);
 
