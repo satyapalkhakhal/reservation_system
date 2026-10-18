@@ -15,17 +15,25 @@ export async function reservationRoutes(
     const body = parseOrThrow(ReserveBody, request.body);
     const user = currentUser(request);
 
-    const reservation = await reservations.reserve({ userId: user.id, showId, seats: body.seats });
+    const { reservation, replayed } = await reservations.reserve({
+      userId: user.id,
+      showId,
+      seats: body.seats,
+      idempotencyKey: body.idempotency_key,
+    });
     request.log.info(
       {
-        event: 'reservation_confirmed',
+        event: replayed ? 'reservation_idempotent_replay' : 'reservation_confirmed',
         show_id: showId,
         user_id: user.id,
         reservation_id: reservation.reservation_id,
         seats: reservation.seats,
       },
-      'reservation confirmed',
+      replayed ? 'idempotent replay' : 'reservation confirmed',
     );
+    // A replay returns the original response (same status and body); the header
+    // lets clients distinguish it.
+    if (replayed) reply.header('Idempotent-Replayed', 'true');
     return reply.status(201).send(reservation);
   });
 }

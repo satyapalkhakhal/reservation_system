@@ -122,3 +122,37 @@ export async function findReservationWithSeats(
   );
   return rows[0] ?? null;
 }
+
+export interface StoredIdempotencyKey {
+  request_hash: string;
+  reservation_id: string;
+}
+
+/**
+ * Called while holding the user's quota lock, so under READ COMMITTED this
+ * sees any key committed by a concurrent request that held the lock before us.
+ */
+export async function findIdempotencyKey(
+  client: PoolClient,
+  userId: string,
+  showId: string,
+  idempotencyKey: string,
+): Promise<StoredIdempotencyKey | null> {
+  const { rows } = await client.query<StoredIdempotencyKey>(
+    `SELECT request_hash, reservation_id FROM idempotency_keys
+      WHERE user_id = $1 AND show_id = $2 AND idempotency_key = $3`,
+    [userId, showId, idempotencyKey],
+  );
+  return rows[0] ?? null;
+}
+
+export async function insertIdempotencyKey(
+  client: PoolClient,
+  input: { user_id: string; show_id: string; idempotency_key: string; request_hash: string; reservation_id: string },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO idempotency_keys (user_id, show_id, idempotency_key, request_hash, reservation_id)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [input.user_id, input.show_id, input.idempotency_key, input.request_hash, input.reservation_id],
+  );
+}

@@ -4,6 +4,12 @@ import { SEAT_LABEL } from '../shows/schemas.js';
 // Unknown fields (e.g. a spoofed "user_id") are stripped: identity comes from the token only.
 export const ReserveBody = z.object({
   seats: z.array(SEAT_LABEL).min(1).max(100),
+  // Required. Compared byte-for-byte (no trimming/case folding).
+  idempotency_key: z
+    .string()
+    .min(1)
+    .max(255)
+    .regex(/^[\x21-\x7E]+$/, 'idempotency_key must be printable ASCII without spaces'),
 });
 export type ReserveBody = z.infer<typeof ReserveBody>;
 
