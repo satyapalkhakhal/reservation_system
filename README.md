@@ -381,6 +381,31 @@ Any platform that runs a Dockerfile next to a managed PostgreSQL works. Generic 
 4. Health check path: `/health/ready` (readiness) and `/health/live` (liveness).
 5. Run `./burst.sh https://<your-host>`.
 
+### Single VM with HTTPS (Docker Compose + Caddy)
+
+This is how the live instance runs: one VM (e.g. GCP e2-standard-2, Ubuntu 24.04) running PostgreSQL, the API and [Caddy](https://caddyserver.com) via `docker-compose.prod.yml`. Caddy terminates TLS with an automatic Let's Encrypt certificate and forwards to the API over the internal Docker network; PostgreSQL is bound to `127.0.0.1` only.
+
+1. Point a DNS **A record** for your hostname (e.g. `reservation.example.com`) at the VM's static IP.
+2. Open inbound TCP **80 and 443** (GCP: tick *Allow HTTP traffic* and *Allow HTTPS traffic*).
+3. On the VM:
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && newgrp docker
+   git clone <this repo> && cd <repo>
+   cat > .env <<EOF
+   DOMAIN=reservation.example.com
+   POSTGRES_PASSWORD=$(openssl rand -hex 24)
+   JWT_SECRET=$(openssl rand -base64 48)
+   AUTH_DEV_TOKENS_ENABLED=true
+   EOF
+   chmod 600 .env
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   ```
+4. `curl https://reservation.example.com/health/ready`, then `./burst.sh https://reservation.example.com` from another machine.
+
+To update: `git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`. All containers use `restart: unless-stopped`, so the stack comes back after a VM reboot.
+
+### Managed platforms
+
 Examples:
 
 - **Render:** create a PostgreSQL instance and a *Web Service* from this repo (runtime: Docker). Set `DATABASE_URL` to the **internal** connection string (`DATABASE_SSL_MODE=disable` on the private network, or the external URL with `verify`), `JWT_SECRET`, `AUTH_DEV_TOKENS_ENABLED=true`; health check path `/health/ready`.

@@ -1,0 +1,8 @@
+# HTTPS reverse proxy for production (used by docker-compose.prod.yml).
+# Caddy obtains and renews a Let's Encrypt certificate for $DOMAIN
+# automatically; DNS for $DOMAIN must point at this server and ports
+# 80 + 443 must be reachable.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000
+}

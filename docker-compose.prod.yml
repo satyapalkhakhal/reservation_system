@@ -1,0 +1,30 @@
+# Production overlay: HTTPS via Caddy in front of the API.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Requires in .env: DOMAIN (e.g. reservation.example.com), POSTGRES_PASSWORD,
+# JWT_SECRET. The API is no longer published directly; only Caddy listens on
+# 80/443 and forwards to app:3000 over the internal network.
+services:
+  app:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates; keep across restarts (Let's Encrypt rate limits)
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
