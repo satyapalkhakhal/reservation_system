@@ -45,6 +45,21 @@ export class ReservationService {
     const seats = normalizeSeats(cmd.seats);
     const requestHash = reservationRequestHash(cmd.showId, seats);
 
+    // Fast decline, outside the transaction and without locks. Under a hot-seat
+    // storm nearly every request targets an already-confirmed seat; answering
+    // those with one read keeps them out of the seat row-lock queue. It only
+    // ever declines (seat taken AND no earlier request with this key); anything
+    // else, including retries of the request that won, takes the locked path.
+    if (attempt === 1) {
+      const probe = await repo.probeForDecline(this.pool, {
+        showId: cmd.showId,
+        seats,
+        userId: cmd.userId,
+        idempotencyKey: cmd.idempotencyKey,
+      });
+      if (probe.taken.length > 0 && !probe.key_exists) throw new SeatTakenError(probe.taken);
+    }
+
     try {
       return await withTransaction(this.pool, async (client) => {
         // 0. Show price/limit. Shows are immutable once created, so no lock needed.
@@ -64,14 +79,16 @@ export class ReservationService {
           return { reservation: toView(original, original.seats), replayed: true };
         }
 
-        // 3. Lock the requested seats in deterministic order and check them.
-        const locked = await repo.lockSeats(client, cmd.showId, seats);
+        // 3. Lock the requested seats that are still available, in seat_number order.
+        //    Getting back every requested seat == all of them are ours to confirm.
+        const locked = await repo.lockAvailableSeats(client, cmd.showId, seats);
         if (locked.length !== seats.length) {
-          const found = new Set(locked.map((s) => s.seat_number));
-          throw new UnknownSeatsError(seats.filter((s) => !found.has(s)));
+          const existing = new Set(await repo.findExistingSeatNumbers(client, cmd.showId, seats));
+          const unknown = seats.filter((s) => !existing.has(s));
+          if (unknown.length > 0) throw new UnknownSeatsError(unknown);
+          const lockedSet = new Set(locked.map((s) => s.seat_number));
+          throw new SeatTakenError(seats.filter((s) => !lockedSet.has(s)));
         }
-        const unavailable = locked.filter((s) => s.status !== 'available').map((s) => s.seat_number);
-        if (unavailable.length > 0) throw new SeatTakenError(unavailable);
 
         // 4. Per-user limit, evaluated while holding the user's quota lock.
         if (alreadyReserved + seats.length > show.per_user_limit) {

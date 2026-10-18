@@ -8,7 +8,7 @@ import type { LockedSeat, Reservation } from './types.js';
  *
  *   1. user_show_quotas row  (per user+show)
  *   2. reservations row      (cancel only)
- *   3. show_seats rows       (ORDER BY seat_number)
+ *   3. show_seats rows       (ORDER BY seat_number, FOR UPDATE)
  */
 
 /**
@@ -48,22 +48,74 @@ export async function adjustUserQuota(
 }
 
 /**
- * Lock 3: the requested seat rows, in deterministic seat_number order
- * (COLLATE "C"). FOR UPDATE blocks until any concurrent transaction holding
- * these rows commits/rolls back, after which PostgreSQL re-reads the latest
- * committed version of the row, so `status` returned here is authoritative
- * for as long as this transaction is open.
+ * Lock 3: the requested seats that are still AVAILABLE, in deterministic
+ * seat_number order (COLLATE "C"). This is the atomic decision point.
+ *
+ * FOR UPDATE blocks while another transaction holds a row. When that
+ * transaction commits, PostgreSQL (READ COMMITTED) re-evaluates the WHERE
+ * clause against the newly committed row version: a seat that has just been
+ * confirmed no longer matches `status = 'available'` and is skipped without
+ * being locked. So:
+ *   - every returned row is locked by us AND available, and stays so until we
+ *     commit or roll back;
+ *   - losers of a hot-seat race drop out inside PostgreSQL without holding
+ *     the row lock, instead of draining one app round-trip at a time.
+ * If fewer rows come back than were requested, the request must be declined.
  */
-export async function lockSeats(client: PoolClient, showId: string, seatNumbers: string[]): Promise<LockedSeat[]> {
+export async function lockAvailableSeats(
+  client: PoolClient,
+  showId: string,
+  seatNumbers: string[],
+): Promise<LockedSeat[]> {
   const { rows } = await client.query<LockedSeat>(
     `SELECT id, seat_number, status
        FROM show_seats
-      WHERE show_id = $1 AND seat_number = ANY($2::text[])
+      WHERE show_id = $1 AND seat_number = ANY($2::text[]) AND status = 'available'
       ORDER BY seat_number
         FOR UPDATE`,
     [showId, seatNumbers],
   );
   return rows;
+}
+
+/** Which of these seat labels exist in the show (seats are never added/removed after creation). */
+export async function findExistingSeatNumbers(db: Queryable, showId: string, seatNumbers: string[]): Promise<string[]> {
+  const { rows } = await db.query<{ seat_number: string }>(
+    `SELECT seat_number FROM show_seats WHERE show_id = $1 AND seat_number = ANY($2::text[])`,
+    [showId, seatNumbers],
+  );
+  return rows.map((r) => r.seat_number);
+}
+
+export interface DeclineProbe {
+  /** Requested seats that are currently not available. */
+  taken: string[];
+  /** Whether this user already has this idempotency key for this show. */
+  key_exists: boolean;
+}
+
+/**
+ * Fast-path probe, run BEFORE the reservation transaction, without locks.
+ * One statement = one snapshot. A reservation commits its seat updates and
+ * its idempotency key atomically, so in this snapshot either both are visible
+ * or neither is. The result may be stale a moment later; callers may use it
+ * only to DECLINE (seat taken and no prior key), never to confirm.
+ */
+export async function probeForDecline(
+  db: Queryable,
+  input: { showId: string; seats: string[]; userId: string; idempotencyKey: string },
+): Promise<DeclineProbe> {
+  const { rows } = await db.query<DeclineProbe>(
+    `SELECT
+       COALESCE((SELECT array_agg(seat_number ORDER BY seat_number)
+                   FROM show_seats
+                  WHERE show_id = $1 AND seat_number = ANY($2::text[]) AND status <> 'available'),
+                '{}') AS taken,
+       EXISTS (SELECT 1 FROM idempotency_keys
+                WHERE user_id = $3 AND show_id = $1 AND idempotency_key = $4) AS key_exists`,
+    [input.showId, input.seats, input.userId, input.idempotencyKey],
+  );
+  return rows[0]!;
 }
 
 export async function insertReservation(

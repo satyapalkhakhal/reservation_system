@@ -91,6 +91,52 @@ describe('idempotency', () => {
     await assertReconciled(h, show.id);
   });
 
+  it('retries of the winning request replay (never SEAT_TAKEN) while the seat is under a storm', async () => {
+    const show = await createShow(h, { seats: 5 });
+    const k = key();
+    const first = await reserve(show.id, 'winner', { seats: ['A3'], idempotency_key: k });
+    expect(first.status).toBe(201);
+
+    // Seat is now confirmed: storm requests take the fast-decline path. The
+    // winner's retries must still be recognised as replays.
+    const ops = [
+      ...Array.from({ length: 200 }, (_, i) => reserve(show.id, `storm-${i}`, { seats: ['A3'], idempotency_key: key() })),
+      ...Array.from({ length: 30 }, () => reserve(show.id, 'winner', { seats: ['A3'], idempotency_key: k })),
+    ];
+    const results = await Promise.all(ops);
+    const retries = results.slice(200);
+    expect(retries.every((r) => r.status === 201 && r.body.reservation_id === first.body.reservation_id)).toBe(true);
+    expect(results.slice(0, 200).every((r) => r.status === 409 && r.body.error.code === 'SEAT_TAKEN')).toBe(true);
+
+    // Same key, different body, on a taken seat: reported as an idempotency conflict.
+    const misuse = await reserve(show.id, 'winner', { seats: ['A3', 'A4'], idempotency_key: k });
+    expect(misuse.status).toBe(409);
+    expect(misuse.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    await assertReconciled(h, show.id);
+  });
+
+  it('first request and its concurrent retries race a crowd for the same free seat', async () => {
+    const show = await createShow(h, { seats: 5 });
+    const k = key();
+    const ops = [
+      ...Array.from({ length: 20 }, () => reserve(show.id, 'racer', { seats: ['A1'], idempotency_key: k })),
+      ...Array.from({ length: 200 }, (_, i) => reserve(show.id, `crowd-${i}`, { seats: ['A1'], idempotency_key: key() })),
+    ];
+    const results = await Promise.all(ops);
+    const racer = results.slice(0, 20);
+    const winners = results.filter((r) => r.status === 201);
+    expect(new Set(winners.map((r) => r.body.reservation_id)).size).toBe(1);
+    if (winners[0]!.body.user_id === 'racer') {
+      // The racer won: every one of its requests must replay the same reservation.
+      expect(racer.every((r) => r.status === 201)).toBe(true);
+    } else {
+      // Someone else won: the racer's requests all lost cleanly.
+      expect(racer.every((r) => r.status === 409 && r.body.error.code === 'SEAT_TAKEN')).toBe(true);
+    }
+    expect(results.some((r) => r.status >= 500)).toBe(false);
+    await assertReconciled(h, show.id);
+  });
+
   it('keys are scoped per user: two users may use the same key independently', async () => {
     const show = await createShow(h, { seats: 10 });
     const k = 'shared-key';
