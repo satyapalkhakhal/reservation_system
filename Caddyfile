@@ -5,6 +5,9 @@
 {$DOMAIN} {
 	encode gzip
 	reverse_proxy app:3000 {
+		# Retry only failures to CONNECT to the app (e.g. during a restart).
+		# The request was never sent, so this cannot double-book.
+		lb_try_duration 5s
 		transport http {
 			# Reuse upstream connections instead of opening a new one per
 			# request under bursts (Caddy's default keeps only 32 idle).

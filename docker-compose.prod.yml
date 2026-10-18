@@ -16,6 +16,13 @@ services:
       - app
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    # On-sale bursts open thousands of TLS connections at once. The default
+    # accept queue (4096) overflows and dropped SYNs are retried by clients
+    # only after 1s/3s/7s, surfacing as connect timeouts. Go sizes its listen
+    # backlog from net.core.somaxconn.
+    sysctls:
+      - net.core.somaxconn=65535
+      - net.ipv4.tcp_max_syn_backlog=65535
     ports:
       - "80:80"
       - "443:443"
