@@ -9,13 +9,16 @@ import { requireAuth } from './modules/auth/middleware.js';
 import { devTokenRoutes } from './modules/auth/routes.js';
 import { ReservationService } from './modules/reservations/service.js';
 import { reservationRoutes } from './modules/reservations/routes.js';
+import { healthRoutes } from './modules/health/routes.js';
 
 export interface AppDeps {
   env: Env;
   pool: Pool;
+  /** Separate small pool for readiness checks. Defaults to `pool`. */
+  healthPool?: Pool;
 }
 
-export async function buildApp({ env, pool }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ env, pool, healthPool }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
   });
@@ -28,7 +31,7 @@ export async function buildApp({ env, pool }: AppDeps): Promise<FastifyInstance>
   const shows = new ShowService(pool, env.PER_USER_LIMIT);
   const reservations = new ReservationService(pool);
 
-  app.get('/health/live', async () => ({ status: 'ok' }));
+  await app.register(healthRoutes, { healthPool: healthPool ?? pool });
   if (env.AUTH_DEV_TOKENS_ENABLED) {
     await app.register(devTokenRoutes, { auth });
   }

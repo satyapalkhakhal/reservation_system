@@ -27,6 +27,19 @@ export function createPool(env: DbEnv): pg.Pool {
   });
 }
 
+/** Tiny separate pool for readiness probes: fast connect timeout, never starved by traffic. */
+export function createHealthPool(env: DbEnv): pg.Pool {
+  return new pg.Pool({
+    connectionString: env.DATABASE_URL,
+    ssl: sslConfig(env),
+    max: 2,
+    connectionTimeoutMillis: 2_000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 2_000,
+    application_name: 'seat-reservation-health',
+  });
+}
+
 function sslConfig(env: DbEnv): pg.PoolConfig['ssl'] {
   switch (env.DATABASE_SSL_MODE) {
     case 'disable':
