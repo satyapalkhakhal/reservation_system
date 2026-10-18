@@ -18,7 +18,7 @@ const DB_UNAVAILABLE_CODES = new Set<string>([
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
 ]);
 
-function isDbUnavailable(err: unknown): boolean {
+export function isDbUnavailable(err: unknown): boolean {
   const code = pgErrorCode(err);
   if (code && DB_UNAVAILABLE_CODES.has(code)) return true;
   const msg = err instanceof Error ? err.message : '';

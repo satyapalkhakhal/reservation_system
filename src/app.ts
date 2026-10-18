@@ -10,6 +10,8 @@ import { devTokenRoutes } from './modules/auth/routes.js';
 import { ReservationService } from './modules/reservations/service.js';
 import { reservationRoutes } from './modules/reservations/routes.js';
 import { healthRoutes } from './modules/health/routes.js';
+import { createMetrics } from './observability/metrics.js';
+import { metricsPlugin } from './observability/http-metrics.js';
 
 export interface AppDeps {
   env: Env;
@@ -30,13 +32,17 @@ export async function buildApp({ env, pool, healthPool }: AppDeps): Promise<Fast
   const authenticate = requireAuth(auth);
   const shows = new ShowService(pool, env.PER_USER_LIMIT);
   const reservations = new ReservationService(pool);
+  const metrics = createMetrics(pool);
 
+  // Hooks registered inside a plugin apply only to that plugin's routes unless
+  // the plugin is unencapsulated; register the HTTP hook at the root instead.
+  await metricsPlugin(app, { metrics });
   await app.register(healthRoutes, { healthPool: healthPool ?? pool });
   if (env.AUTH_DEV_TOKENS_ENABLED) {
     await app.register(devTokenRoutes, { auth });
   }
   await app.register(showRoutes, { shows, authenticate });
-  await app.register(reservationRoutes, { reservations, authenticate });
+  await app.register(reservationRoutes, { reservations, authenticate, metrics });
 
   return app;
 }

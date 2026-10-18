@@ -1,26 +1,63 @@
 import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
 import { parseOrThrow } from '../../common/utils/validation.js';
+import { DomainError } from '../../common/errors/domain-errors.js';
+import { isDbUnavailable } from '../../common/errors/error-handler.js';
+import { declineReasonFor, type Metrics } from '../../observability/metrics.js';
 import { currentUser } from '../auth/middleware.js';
 import { ReservationIdParams, ReserveBody, ReserveParams } from './schemas.js';
 import type { ReservationService } from './service.js';
 
 export async function reservationRoutes(
   app: FastifyInstance,
-  opts: { reservations: ReservationService; authenticate: preHandlerAsyncHookHandler },
+  opts: { reservations: ReservationService; authenticate: preHandlerAsyncHookHandler; metrics: Metrics },
 ): Promise<void> {
-  const { reservations, authenticate } = opts;
+  const { reservations, authenticate, metrics } = opts;
 
   app.post('/shows/:showId/reserve', { preHandler: authenticate }, async (request, reply) => {
-    const { showId } = parseOrThrow(ReserveParams, request.params);
-    const body = parseOrThrow(ReserveBody, request.body);
     const user = currentUser(request);
+    const endTimer = metrics.reservationDuration.startTimer();
+    let result;
+    try {
+      const { showId } = parseOrThrow(ReserveParams, request.params);
+      const body = parseOrThrow(ReserveBody, request.body);
+      result = await reservations.reserve({
+        userId: user.id,
+        showId,
+        seats: body.seats,
+        idempotencyKey: body.idempotency_key,
+      });
+    } catch (err) {
+      const reason =
+        err instanceof DomainError ? declineReasonFor(err.code) : isDbUnavailable(err) ? 'unavailable' : undefined;
+      if (reason) {
+        metrics.reservationsDeclined.labels(reason).inc();
+        endTimer({ outcome: 'declined' });
+        // Expected business outcome: info, not error. The error handler builds the response.
+        request.log.info(
+          {
+            event: 'reservation_declined',
+            reason,
+            show_id: (request.params as { showId?: string }).showId,
+            user_id: user.id,
+            ...(err instanceof DomainError && err.details ? { details: err.details } : {}),
+          },
+          'reservation declined',
+        );
+      } else {
+        endTimer({ outcome: 'error' });
+      }
+      throw err;
+    }
 
-    const { reservation, replayed } = await reservations.reserve({
-      userId: user.id,
-      showId,
-      seats: body.seats,
-      idempotencyKey: body.idempotency_key,
-    });
+    const { reservation, replayed } = result;
+    const showId = reservation.show_id;
+    if (replayed) {
+      metrics.reservationsDeclined.labels('idempotent_replay').inc();
+      endTimer({ outcome: 'replayed' });
+    } else {
+      metrics.reservationsConfirmed.inc();
+      endTimer({ outcome: 'confirmed' });
+    }
     request.log.info(
       {
         event: replayed ? 'reservation_idempotent_replay' : 'reservation_confirmed',
@@ -42,6 +79,7 @@ export async function reservationRoutes(
     const user = currentUser(request);
 
     const reservation = await reservations.cancel(user.id, reservationId);
+    metrics.reservationsCancelled.inc();
     request.log.info(
       {
         event: 'reservation_cancelled',
