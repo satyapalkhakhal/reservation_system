@@ -11,4 +11,9 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // Tests read loosely-typed JSON responses.
+    files: ['test/**/*.ts', 'scripts/**/*.ts'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+  },
 );
