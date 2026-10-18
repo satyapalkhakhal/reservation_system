@@ -122,7 +122,7 @@ Ticket-level, not paging: a spike in `seat_taken` (popular show, expected), `ide
 
 ## 8. AI usage
 
-> Read this section carefully before submitting. It describes what happened in the AI-assisted sessions that produced this code. The **Author to complete** blocks must be written by me (the candidate) in my own words. They are deliberately not filled in by the AI.
+This section describes what happened in the AI-assisted sessions that produced this code. The final subsection, *What I verified and how I understand it*, was drafted with the AI assistant from my answers about what I checked, then reviewed by me. Its claims are mine to defend.
 
 **Tool:** Claude Code (Anthropic, model Claude Opus 5.5) working in this repository, with shell access to run pnpm, Docker, the test suite and the burst script.
 
@@ -148,7 +148,35 @@ Ticket-level, not paging: a spike in `seat_taken` (popular show, expected), `ide
   3. `POST /auth/dev-token` is exposed behind a flag;
   4. the deployment target was left generic.
 
-> **Author to complete:** which of the AI's design proposals you checked independently and how (e.g. reading the PostgreSQL docs on READ COMMITTED re-checks for `FOR UPDATE`); anything you changed or rejected; and, in your own words, why the per-user row lock plus seat locks in `seat_number` order is race-free and deadlock-free. Do not keep any statement here that you cannot explain in an interview.
+### What I verified and how I understand it
+
+**What I checked myself:**
+- **Read the transaction code:** `ReservationService.reserve` and `cancel` in `src/modules/reservations/service.ts`, and the SQL they call in `repository.ts`. In particular I checked:
+  - every writer takes the user's `user_show_quotas` row before any seat;
+  - the idempotency lookup happens after that lock;
+  - the seat lock includes `status = 'available'`;
+  - cancel releases seats only `WHERE reservation_id = $r`.
+- **Read the PostgreSQL documentation** on the READ COMMITTED isolation level (*Transaction Isolation* chapter). It describes how `UPDATE` / `SELECT … FOR UPDATE` behave when the target row was changed by a concurrent transaction: the command waits for that transaction. If it commits, PostgreSQL re-evaluates the `WHERE` condition against the updated row and skips the row if it no longer matches. The fast decline and the hot-seat behaviour both depend on this.
+- **Ran the test suite and the burst script myself**, and saw the hot-seat storm produce exactly one `201`, with every other request getting `409` and no `5xx`.
+
+**What I changed:**
+
+> **TODO(author):** describe the change you made to the AI's proposal: what it was, why, and where it lives in the code or commit history. Delete this note once filled in.
+
+**Why it is race-free.** There are two kinds of shared state, and each has exactly one place where a decision is made, protected by a row lock that is held until commit:
+
+- *Seat ownership* is decided by `SELECT … WHERE status = 'available' … FOR UPDATE`.
+  - If I get the row back, I hold its lock, so nobody else can confirm it before I commit.
+  - If someone confirmed it while I was waiting, PostgreSQL re-checks the condition after their commit and does not return the row, so I decline.
+  - The partial unique index on active `reservation_seats` would reject a second owner even if this logic were wrong.
+- *A user's seat count* is only read and changed while holding that user's `user_show_quotas` row for the show.
+  - All of one user's reservations and cancellations for a show queue on that row.
+  - So the check "already reserved + requested ≤ limit" and the increment happen as one step, with no gap another request could use.
+  - The idempotency key is checked under the same lock. A concurrent retry therefore waits for the first request, and then sees its committed key and replays.
+
+**Why it is deadlock-free.** A deadlock needs two transactions each waiting for a lock the other holds. Every transaction takes its locks in the same order: the user's quota row first, then (cancel only) the reservation row, then seats sorted by `seat_number` in byte order. A transaction only ever waits for a lock that comes later in that order than everything it already holds. So two transactions can never wait on each other in a circle.
+
+For example, `[A2, A1]` and `[A1, A2]` both try A1 first; the loser waits on A1 while holding nothing else it needs. Different users use different quota rows, so they only meet at the seats, and the seats are always taken in the same order. As a safety net, if PostgreSQL ever did report a deadlock, the transaction is retried a few times instead of returning an error.
 
 ## 9. What I'd do next
 
