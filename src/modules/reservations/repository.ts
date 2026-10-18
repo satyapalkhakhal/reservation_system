@@ -156,3 +156,67 @@ export async function insertIdempotencyKey(
     [input.user_id, input.show_id, input.idempotency_key, input.request_hash, input.reservation_id],
   );
 }
+
+export async function findReservation(db: Queryable, reservationId: string): Promise<Reservation | null> {
+  const { rows } = await db.query<Reservation>(
+    `SELECT id, show_id, user_id, status, seat_count, amount_paise, created_at, cancelled_at
+       FROM reservations WHERE id = $1`,
+    [reservationId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Lock 2 (cancel only): the reservation row. */
+export async function lockReservation(client: PoolClient, reservationId: string): Promise<Reservation> {
+  const { rows } = await client.query<Reservation>(
+    `SELECT id, show_id, user_id, status, seat_count, amount_paise, created_at, cancelled_at
+       FROM reservations WHERE id = $1
+        FOR UPDATE`,
+    [reservationId],
+  );
+  return rows[0]!;
+}
+
+/** Lock 3 (cancel): the seats this reservation currently owns, in seat order. */
+export async function lockSeatsOwnedBy(client: PoolClient, reservationId: string): Promise<LockedSeat[]> {
+  const { rows } = await client.query<LockedSeat>(
+    `SELECT id, seat_number, status
+       FROM show_seats
+      WHERE reservation_id = $1
+      ORDER BY seat_number
+        FOR UPDATE`,
+    [reservationId],
+  );
+  return rows;
+}
+
+/**
+ * Release seats back to available. The `reservation_id = $1` guard means this
+ * can only ever touch seats still owned by THIS reservation: it can never
+ * overwrite a seat that belongs to someone else.
+ */
+export async function releaseSeats(client: PoolClient, reservationId: string): Promise<number> {
+  const result = await client.query(
+    `UPDATE show_seats
+        SET status = 'available', reservation_id = NULL, updated_at = now()
+      WHERE reservation_id = $1`,
+    [reservationId],
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function deactivateReservationSeats(client: PoolClient, reservationId: string): Promise<void> {
+  await client.query(`UPDATE reservation_seats SET active = false WHERE reservation_id = $1 AND active`, [
+    reservationId,
+  ]);
+}
+
+export async function markCancelled(client: PoolClient, reservationId: string): Promise<Reservation> {
+  const { rows } = await client.query<Reservation>(
+    `UPDATE reservations SET status = 'cancelled', cancelled_at = now()
+      WHERE id = $1 AND status = 'confirmed'
+      RETURNING id, show_id, user_id, status, seat_count, amount_paise, created_at, cancelled_at`,
+    [reservationId],
+  );
+  return rows[0]!;
+}

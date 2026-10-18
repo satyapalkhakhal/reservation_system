@@ -4,8 +4,11 @@ import { PG, pgConstraint, pgErrorCode } from '../../db/pg-errors.js';
 import {
   IdempotencyConflictError,
   PerUserLimitError,
+  ReservationAlreadyCancelledError,
+  ReservationNotFoundError,
   SeatTakenError,
   ShowNotFoundError,
+  UnauthorizedReservationError,
   UnknownSeatsError,
   ValidationError,
 } from '../../common/errors/domain-errors.js';
@@ -116,6 +119,45 @@ export class ReservationService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Cancel a confirmed reservation and release its seats, atomically.
+   * Lock order matches reserve(): user quota row -> reservation row -> seats.
+   */
+  async cancel(userId: string, reservationId: string): Promise<ReservationView> {
+    return withTransaction(this.pool, async (client) => {
+      // Ownership check. user_id/show_id never change, so an unlocked read is fine.
+      const found = await repo.findReservation(client, reservationId);
+      if (!found) throw new ReservationNotFoundError(reservationId);
+      if (found.user_id !== userId) throw new UnauthorizedReservationError();
+
+      // 1. Same per-user lock as reserve(), so the counter and limit stay consistent.
+      await repo.lockUserQuota(client, found.user_id, found.show_id);
+
+      // 2. Lock the reservation; a concurrent cancel of the same reservation waits
+      //    here and then sees status = 'cancelled'.
+      const reservation = await repo.lockReservation(client, reservationId);
+      if (reservation.status !== 'confirmed') throw new ReservationAlreadyCancelledError(reservationId);
+
+      // 3. Lock and release only the seats this reservation still owns.
+      const owned = await repo.lockSeatsOwnedBy(client, reservationId);
+      const released = await repo.releaseSeats(client, reservationId);
+      if (released !== reservation.seat_count || owned.length !== released) {
+        // A confirmed reservation always owns exactly seat_count seats; refuse to guess otherwise.
+        throw new Error(
+          `Invariant violated: reservation ${reservationId} owns ${released} seats, expected ${reservation.seat_count}`,
+        );
+      }
+      await repo.deactivateReservationSeats(client, reservationId);
+      await repo.adjustUserQuota(client, reservation.user_id, reservation.show_id, -reservation.seat_count);
+      const cancelled = await repo.markCancelled(client, reservationId);
+
+      return toView(
+        cancelled,
+        owned.map((s) => s.seat_number),
+      );
+    });
   }
 }
 
