@@ -347,6 +347,35 @@ ALL CHECKS PASSED
 
 ---
 
+### Load testing with k6
+
+`burst.ts` checks correctness across requests; for raw load and capacity, [scripts/k6-stampede.js](scripts/k6-stampede.js) drives the same on-sale stampede with Grafana k6 (Go engine, far cheaper per connection than Node). It runs in Docker, nothing to install:
+
+```bash
+# concurrency mode: 25,000 reservations, 5,000 in flight
+docker run --rm -i --network host \
+  -e BASE_URL=https://reservation.example.com -e JWT_SECRET='<server JWT_SECRET>' \
+  -e REQUESTS=25000 -e VUS=5000 \
+  grafana/k6 run - < scripts/k6-stampede.js
+
+# rate mode: 2,000 reservations/second for 60 s
+docker run --rm -i --network host \
+  -e BASE_URL=https://reservation.example.com -e JWT_SECRET='<server JWT_SECRET>' \
+  -e RATE=2000 -e DURATION=60s -e VUS=20000 \
+  grafana/k6 run - < scripts/k6-stampede.js
+```
+
+| Env | Default | Meaning |
+|---|---|---|
+| `BASE_URL` | – (required) | Target |
+| `JWT_SECRET` | – | Sign tokens locally (one user per request, no extra traffic). Without it each virtual user fetches one `/auth/dev-token` |
+| `REQUESTS` / `VUS` | 25000 / 5000 | Concurrency mode: total reservations / in flight |
+| `RATE` / `DURATION` | – / 60s | Rate mode: reservations per second / how long (`VUS` caps virtual users) |
+| `HOT_SEATS` / `HALL` / `RETRY_RATIO` | 5 / 500 / 0.2 | Traffic mix |
+| `INSECURE=1` | off | Skip TLS verification (localhost with Caddy's local certificate only) |
+
+Thresholds fail the run on any 5xx, any connection failure, or any reservation not answered `201`/`409`; teardown checks `available + held + confirmed == total`. Custom counters break results down by outcome (`reserve_201_confirmed`, `reserve_201_replayed`, `reserve_409_seat_taken`, `reserve_409_per_user_limit`, …). Run it from a machine close to the server, not through a home router; for very high concurrency, run it from several machines at once.
+
 ## Observability
 
 **Metrics** (`GET /metrics`):

@@ -16,4 +16,9 @@ export default tseslint.config(
     files: ['test/**/*.ts', 'scripts/**/*.ts'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
+  {
+    // k6 scripts run in k6's JS runtime, not Node.
+    files: ['scripts/k6-*.js'],
+    languageOptions: { globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', console: 'readonly' } },
+  },
 );
