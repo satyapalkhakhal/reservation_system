@@ -98,9 +98,10 @@ Accepting reservations without the database would mean deciding seat ownership w
 - `reservations_declined_total{reason}`, with reasons `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict`, `unknown_seats`, `show_not_found`, `validation`, `unavailable`
 - `reservations_cancelled_total`
 - `reservation_duration_seconds{outcome}`
-- HTTP latency and count by `{method, route template, status_code}`
+- `http_requests_total` by `{method, route template, status_code}`
 - `db_pool_connections{state=total|idle|waiting}`
-- Node.js runtime defaults
+
+Only domain and service-health metrics are exported; generic Node.js runtime metrics (heap, GC, handles) were removed so the relevant ones stand out.
 
 The seat gauges (`seats_available` / `held` / `confirmed` / `total`) are **queried from PostgreSQL at scrape time**. So they reconcile exactly with `GET /shows/:id` summed across shows, across restarts and replicas. Counters are per process, the Prometheus norm, so use `sum(rate(...))`. No identifiers appear as labels.
 

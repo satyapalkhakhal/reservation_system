@@ -357,13 +357,12 @@ ALL CHECKS PASSED
 | `reservations_declined_total{reason}` | counter | `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict`, `unknown_seats`, `show_not_found`, `validation`, `unavailable` (all pre-initialized to 0) |
 | `reservations_cancelled_total` | counter | |
 | `reservation_duration_seconds{outcome}` | histogram | `confirmed` / `replayed` / `declined` / `error` |
-| `http_request_duration_seconds`, `http_requests_total` `{method,route,status_code}` | histogram / counter | `route` is the template (`/shows/:showId/reserve`), never the raw URL |
+| `http_requests_total{method,route,status_code}` | counter | for the 5xx-rate alert; `route` is the template (`/shows/:showId/reserve`), never the raw URL; health/metrics probes excluded |
 | `seats_available`, `seats_held`, `seats_confirmed`, `seats_total` | gauge | read from PostgreSQL **at scrape time**: always equal to the sum of `GET /shows/:id` counts across shows, regardless of restarts or replica count |
 | `seat_metrics_scrape_success` | gauge | `0` if the seat gauges could not be read (gauges are then omitted rather than stale) |
 | `db_pool_connections{state}` | gauge | `total` / `idle` / `waiting` |
-| Node.js process defaults | | event-loop lag, heap, GC, … |
 
-No `user_id`, `reservation_id`, `request_id` or `show_id` labels.
+Only domain and service-health metrics are exported: no generic Node.js runtime metrics. No `user_id`, `reservation_id`, `request_id` or `show_id` labels.
 
 **Logs** are JSON lines (pino) with ISO `time`, string `level`, `service`, and `request_id` on every request-scoped line. Domain events carry `event`, `show_id`, `user_id`, `reservation_id`, `seats`:
 

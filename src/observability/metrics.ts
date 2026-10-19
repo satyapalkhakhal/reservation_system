@@ -1,5 +1,5 @@
 import cluster from 'node:cluster';
-import { AggregatorRegistry, Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import { AggregatorRegistry, Counter, Gauge, Histogram, Registry } from 'prom-client';
 import type { Pool } from '../db/pool.js';
 
 export const DECLINE_REASONS = [
@@ -25,8 +25,9 @@ let workerAggregator: object | undefined;
  * template, status code). Never user_id / reservation_id / request_id / show_id.
  */
 export function createMetrics(pool: Pool) {
+  // Only domain and service-health metrics: no generic Node.js runtime
+  // metrics (heap, GC, handles...), which drowned out the relevant ones.
   const registry = new Registry();
-  collectDefaultMetrics({ register: registry });
   // In cluster mode the primary asks every worker for this registry and
   // merges them: counters/histograms are summed, gauges use the aggregator
   // declared on each metric.
@@ -65,17 +66,9 @@ export function createMetrics(pool: Pool) {
     registers: [registry],
   });
 
-  const httpDuration = new Histogram({
-    name: 'http_request_duration_seconds',
-    help: 'HTTP request latency',
-    labelNames: ['method', 'route', 'status_code'] as const,
-    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-    registers: [registry],
-  });
-
   const httpTotal = new Counter({
     name: 'http_requests_total',
-    help: 'HTTP requests',
+    help: 'HTTP requests (health and metrics probes excluded)',
     labelNames: ['method', 'route', 'status_code'] as const,
     registers: [registry],
   });
@@ -102,7 +95,6 @@ export function createMetrics(pool: Pool) {
     reservationsDeclined,
     reservationsCancelled,
     reservationDuration,
-    httpDuration,
     httpTotal,
   };
 }
