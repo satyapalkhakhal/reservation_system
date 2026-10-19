@@ -235,7 +235,15 @@ function summarize(title: string, results: Result[]): { s201: number; s5xx: numb
   console.log(`201: ${s201}`);
   for (const [k, v] of [...by.entries()].sort()) console.log(`${k}: ${v}`);
   console.log(`5xx: ${s5xx}`);
-  if (net) console.log(`network errors: ${net}`);
+  if (net) {
+    console.log(`network errors: ${net}`);
+    if (s5xx === 0) {
+      console.log(
+        '  (connections that never reached the server, e.g. connect timeouts from the client network;\n' +
+          '   the server returned no errors. From a laptop, try a lower --concurrency or run closer to the server.)',
+      );
+    }
+  }
   console.log(`latency ms p50=${pct(lat, 50).toFixed(0)} p95=${pct(lat, 95).toFixed(0)} p99=${pct(lat, 99).toFixed(0)} max=${pct(lat, 100).toFixed(0)}`);
   return { s201, s5xx, net };
 }
@@ -431,10 +439,13 @@ async function main(): Promise<void> {
     const doubleSold = [...winnersBySeat.entries()].filter(([, ids]) => ids.size > 1).map(([seat]) => seat);
     const hotWinners = hot.map((seat) => winnersBySeat.get(seat)?.size ?? 0);
 
-    // Idempotency: every request sharing a key must get the same outcome.
+    // Idempotency: every request sharing a key that got an HTTP response must
+    // have the same outcome. Requests that never reached the server (network
+    // errors) have no outcome; they are counted by the zero-network-errors check.
     const byKey = new Map<string, Set<string>>();
     specs.forEach((sp, i) => {
       const r = results[i]!;
+      if (r.status === 0) return;
       const outcome = r.status === 201 ? `201:${r.body.reservation_id}` : `${r.status}:${r.code}`;
       if (!byKey.has(sp.key)) byKey.set(sp.key, new Set());
       byKey.get(sp.key)!.add(outcome);
@@ -460,7 +471,11 @@ async function main(): Promise<void> {
       state.body.counts.confirmed === reservationIds.size,
       `confirmed=${state.body.counts.confirmed} reservations=${reservationIds.size}`,
     );
-    check('stampede: same key -> same outcome for every retry', inconsistentKeys === 0, `inconsistent keys=${inconsistentKeys}/${byKey.size}`);
+    check(
+      'stampede: same key -> same outcome for every retry (requests that got a response)',
+      inconsistentKeys === 0,
+      `inconsistent keys=${inconsistentKeys}/${byKey.size}`,
+    );
     check(
       'stampede: invariant held in every live sample during the burst',
       samples.length > 0 && badSamples.length === 0,
