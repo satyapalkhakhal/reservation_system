@@ -47,6 +47,16 @@ const HOT_SEATS = flag('hot-seats', 5);
 const HALL = flag('hall', 500);
 const RUN = randomUUID().slice(0, 8); // unique user ids per run
 
+/**
+ * process.exit() right after console.log can drop the last lines when stdout
+ * is a pipe (writes to pipes are asynchronous). Exit only once stdout and
+ * stderr have flushed everything written so far.
+ */
+function exitAfterFlush(code: number): void {
+  process.exitCode = code;
+  process.stdout.write('', () => process.stderr.write('', () => process.exit(code)));
+}
+
 // ---------- http ----------
 interface Result {
   status: number; // 0 = network error
@@ -497,13 +507,13 @@ async function main(): Promise<void> {
   for (const c of checks) console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}  (${c.detail})`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(`\n${failed === 0 ? 'ALL CHECKS PASSED' : `${failed} CHECK(S) FAILED`}`);
-  process.exit(failed === 0 ? 0 : 1);
+  exitAfterFlush(failed === 0 ? 0 : 1);
 }
 
 if (isMainThread) {
   main().catch((err: unknown) => {
     console.error(`burst test aborted: ${(err as Error).message}`);
-    process.exit(1);
+    exitAfterFlush(1);
   });
 } else {
   void workerMain();
