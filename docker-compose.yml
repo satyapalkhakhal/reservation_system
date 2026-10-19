@@ -9,7 +9,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-reservations}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-password}
       POSTGRES_DB: ${POSTGRES_DB:-reservations}
-    command: ["postgres", "-c", "max_connections=200"]
+    # Budget: DB_POOL_TOTAL (160) for request pools + 2 per worker for
+    # readiness + migrations, with headroom.
+    command: ["postgres", "-c", "max_connections=300"]
     ports:
       # Host port 55432 (localhost only) to avoid clashing with a local PostgreSQL.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
@@ -32,7 +34,11 @@ services:
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://${POSTGRES_USER:-reservations}:${POSTGRES_PASSWORD:-local-dev-password}@postgres:5432/${POSTGRES_DB:-reservations}
-      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      # Empty = automatic: 20 for one process, or DB_POOL_TOTAL split across workers.
+      DB_POOL_MAX: ${DB_POOL_MAX:-}
+      DB_POOL_TOTAL: ${DB_POOL_TOTAL:-160}
+      # One Node worker per CPU core (node:cluster). Set 1 to disable.
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-auto}
       PER_USER_LIMIT: ${PER_USER_LIMIT:-4}
       JWT_SECRET: ${JWT_SECRET:-local-dev-only-jwt-secret-change-me-0000}
       AUTH_DEV_TOKENS_ENABLED: ${AUTH_DEV_TOKENS_ENABLED:-true}

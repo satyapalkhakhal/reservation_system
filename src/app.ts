@@ -43,7 +43,7 @@ export async function buildApp({ env, pool, healthPool, logStream }: AppDeps): P
 
   // Hooks registered inside a plugin apply only to that plugin's routes unless
   // the plugin is unencapsulated; register the HTTP hook at the root instead.
-  await metricsPlugin(app, { metrics });
+  await metricsPlugin(app, { metrics, aggregatorPort: env.METRICS_AGG_PORT });
   await app.register(healthRoutes, { healthPool: healthPool ?? pool });
   if (env.AUTH_DEV_TOKENS_ENABLED) {
     await app.register(devTokenRoutes, { auth });

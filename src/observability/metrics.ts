@@ -1,4 +1,5 @@
-import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import cluster from 'node:cluster';
+import { AggregatorRegistry, Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 import type { Pool } from '../db/pool.js';
 
 export const DECLINE_REASONS = [
@@ -13,6 +14,9 @@ export const DECLINE_REASONS = [
 ] as const;
 export type DeclineReason = (typeof DECLINE_REASONS)[number];
 
+// Kept only for its side effect (IPC listener); never read.
+let workerAggregator: object | undefined;
+
 /**
  * All metrics live in a per-app Registry (not the prom-client global) so
  * multiple app instances can coexist in tests.
@@ -23,6 +27,15 @@ export type DeclineReason = (typeof DECLINE_REASONS)[number];
 export function createMetrics(pool: Pool) {
   const registry = new Registry();
   collectDefaultMetrics({ register: registry });
+  // In cluster mode the primary asks every worker for this registry and
+  // merges them: counters/histograms are summed, gauges use the aggregator
+  // declared on each metric.
+  if (cluster.isWorker) {
+    // prom-client only installs the worker's "send my metrics" IPC listener
+    // when an AggregatorRegistry is constructed, so construct one once.
+    workerAggregator ??= new AggregatorRegistry();
+    AggregatorRegistry.setRegistries([registry]);
+  }
 
   const reservationsConfirmed = new Counter({
     name: 'reservations_confirmed_total',
@@ -69,21 +82,56 @@ export function createMetrics(pool: Pool) {
 
   // Seat gauges are read from PostgreSQL at scrape time, so they always match
   // what GET /shows/:id reports (summed across shows), across all instances.
-  const seatGauges = {
-    available: new Gauge({ name: 'seats_available', help: 'Seats currently available (all shows)', registers: [registry] }),
-    held: new Gauge({ name: 'seats_held', help: 'Seats currently held (all shows)', registers: [registry] }),
-    confirmed: new Gauge({ name: 'seats_confirmed', help: 'Seats currently confirmed (all shows)', registers: [registry] }),
-    total: new Gauge({ name: 'seats_total', help: 'All seats (all shows)', registers: [registry] }),
-  };
-  const seatScrapeOk = new Gauge({
+  // All four share one query per scrape. In cluster mode every worker reads
+  // the same database, so they are merged with `max` (not summed).
+  type SeatCounts = { available: number; held: number; confirmed: number };
+  let seatRead: Promise<SeatCounts | null> | null = null;
+  function readSeatCounts(): Promise<SeatCounts | null> {
+    if (!seatRead) {
+      seatRead = pool
+        .query<{ status: keyof SeatCounts; n: number }>(`SELECT status, count(*)::int AS n FROM show_seats GROUP BY status`)
+        .then(({ rows }) => {
+          const counts: SeatCounts = { available: 0, held: 0, confirmed: 0 };
+          for (const r of rows) counts[r.status] = r.n;
+          return counts;
+        })
+        .catch(() => null)
+        // Shared only by the gauges of this scrape; the next scrape re-reads.
+        .finally(() => setImmediate(() => (seatRead = null)));
+    }
+    return seatRead;
+  }
+  function seatGauge(name: string, help: string, pick: (c: SeatCounts) => number): Gauge {
+    return new Gauge({
+      name,
+      help,
+      aggregator: 'max',
+      registers: [registry],
+      async collect() {
+        const c = await readSeatCounts();
+        // Do not export stale numbers as if they were current.
+        if (c) this.set(pick(c));
+        else this.reset();
+      },
+    });
+  }
+  seatGauge('seats_available', 'Seats currently available (all shows)', (c) => c.available);
+  seatGauge('seats_held', 'Seats currently held (all shows)', (c) => c.held);
+  seatGauge('seats_confirmed', 'Seats currently confirmed (all shows)', (c) => c.confirmed);
+  seatGauge('seats_total', 'All seats (all shows)', (c) => c.available + c.held + c.confirmed);
+  new Gauge({
     name: 'seat_metrics_scrape_success',
     help: '1 if seat gauges were read from PostgreSQL on this scrape, else 0',
+    aggregator: 'min',
     registers: [registry],
+    async collect() {
+      this.set((await readSeatCounts()) ? 1 : 0);
+    },
   });
 
   new Gauge({
     name: 'db_pool_connections',
-    help: 'Request pool connections by state',
+    help: 'Request pool connections by state (summed across cluster workers)',
     labelNames: ['state'] as const,
     registers: [registry],
     collect() {
@@ -93,25 +141,6 @@ export function createMetrics(pool: Pool) {
     },
   });
 
-  async function refreshSeatGauges(): Promise<void> {
-    try {
-      const { rows } = await pool.query<{ status: 'available' | 'held' | 'confirmed'; n: number }>(
-        `SELECT status, count(*)::int AS n FROM show_seats GROUP BY status`,
-      );
-      const counts = { available: 0, held: 0, confirmed: 0 };
-      for (const r of rows) counts[r.status] = r.n;
-      seatGauges.available.set(counts.available);
-      seatGauges.held.set(counts.held);
-      seatGauges.confirmed.set(counts.confirmed);
-      seatGauges.total.set(counts.available + counts.held + counts.confirmed);
-      seatScrapeOk.set(1);
-    } catch {
-      // Do not export stale numbers as if they were current.
-      for (const g of Object.values(seatGauges)) g.reset();
-      seatScrapeOk.set(0);
-    }
-  }
-
   return {
     registry,
     reservationsConfirmed,
@@ -120,7 +149,6 @@ export function createMetrics(pool: Pool) {
     reservationDuration,
     httpDuration,
     httpTotal,
-    refreshSeatGauges,
   };
 }
 

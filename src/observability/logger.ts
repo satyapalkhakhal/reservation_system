@@ -1,3 +1,4 @@
+import cluster from 'node:cluster';
 import { randomUUID } from 'node:crypto';
 import { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { IncomingMessage } from 'node:http';
@@ -21,7 +22,7 @@ export function loggerOptions(
   return {
     logger: {
       level: env.LOG_LEVEL,
-      base: { service: 'seat-reservation', env: env.NODE_ENV },
+      base: { service: 'seat-reservation', env: env.NODE_ENV, ...(cluster.isWorker ? { worker: cluster.worker?.id } : {}) },
       timestamp: () => `,"time":"${new Date().toISOString()}"`,
       formatters: { level: (label) => ({ level: label }) },
       redact: {

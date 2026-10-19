@@ -12,11 +12,11 @@ pg.types.setTypeParser(pg.types.builtins.INT8, (v) => {
 export type Pool = pg.Pool;
 export type PoolClient = pg.PoolClient;
 
-export function createPool(env: DbEnv): pg.Pool {
+export function createPool(env: DbEnv, max: number = env.DB_POOL_MAX ?? 20): pg.Pool {
   return new pg.Pool({
     connectionString: env.DATABASE_URL,
     ssl: sslConfig(env),
-    max: env.DB_POOL_MAX,
+    max,
     // Also bounds how long a request waits in the pool queue for a client.
     connectionTimeoutMillis: env.DB_POOL_ACQUIRE_TIMEOUT_MS,
     idleTimeoutMillis: 30_000,

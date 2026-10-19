@@ -457,13 +457,15 @@ async function main(): Promise<void> {
       `samples=${samples.length} bad=${badSamples.length}`,
     );
     check('stampede: confirmed count never decreased during the burst', monotonic, `samples=${samples.length}`);
-    if (Number.isFinite(confirmedBefore) && Number.isFinite(confirmedAfter)) {
-      check(
-        'stampede: metrics reservations_confirmed_total moved by exactly the new reservations',
-        confirmedAfter - confirmedBefore === reservationIds.size,
-        `delta=${confirmedAfter - confirmedBefore} reservations=${reservationIds.size}`,
-      );
-    }
+    // An unreadable /metrics is a failure, not a skipped check.
+    const metricsReadable = Number.isFinite(confirmedBefore) && Number.isFinite(confirmedAfter);
+    check(
+      'stampede: metrics reservations_confirmed_total moved by exactly the new reservations',
+      metricsReadable && confirmedAfter - confirmedBefore === reservationIds.size,
+      metricsReadable
+        ? `delta=${confirmedAfter - confirmedBefore} reservations=${reservationIds.size}`
+        : '/metrics unreadable or missing reservations_confirmed_total',
+    );
   }
 
   // 6. Final reconciliation from the public API.

@@ -20,12 +20,24 @@ const EnvSchema = z.object({
   // no-verify: TLS without verification; explicit opt-in only, never the default
   DATABASE_SSL_MODE: z.enum(['disable', 'verify', 'no-verify']).default('disable'),
   DATABASE_CA_CERT: z.string().optional(),
-  DB_POOL_MAX: z.coerce.number().int().positive().default(20),
+  // Connections per process. Unset: 20 for a single process, or an equal
+  // share of DB_POOL_TOTAL per worker in cluster mode.
+  DB_POOL_MAX: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().positive().optional()),
+  DB_POOL_TOTAL: z.coerce.number().int().positive().default(160),
   // How long a request may wait for a free pool connection before we answer 503.
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   // Upper bound on waiting for a row lock inside a transaction (hot-seat queue).
   DB_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+
+  // Node runs JS on one core per process. "auto" = one worker per CPU core
+  // (node:cluster, shared listening socket), or a fixed number. 1 = no cluster.
+  WEB_CONCURRENCY: z
+    .union([z.literal('auto'), z.coerce.number().int().min(1).max(128)])
+    .default(1),
+  // Internal port (127.0.0.1 only) where the cluster primary serves metrics
+  // aggregated across workers; /metrics on any worker proxies to it.
+  METRICS_AGG_PORT: z.coerce.number().int().positive().default(9464),
 
   PER_USER_LIMIT: z.coerce.number().int().positive().default(4),
 
@@ -43,6 +55,7 @@ const DbEnvSchema = EnvSchema.pick({
   DATABASE_SSL_MODE: true,
   DATABASE_CA_CERT: true,
   DB_POOL_MAX: true,
+  DB_POOL_TOTAL: true,
   DB_POOL_ACQUIRE_TIMEOUT_MS: true,
   DB_LOCK_TIMEOUT_MS: true,
   DB_STATEMENT_TIMEOUT_MS: true,
@@ -65,4 +78,15 @@ function parseOrThrow<S extends z.ZodType>(schema: S, source: NodeJS.ProcessEnv)
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
   return parsed.data;
+}
+
+/** Number of cluster workers (1 = run the app in this process). */
+export function resolveWorkers(env: Pick<Env, 'WEB_CONCURRENCY'>, cpus: number): number {
+  return env.WEB_CONCURRENCY === 'auto' ? Math.max(1, cpus) : env.WEB_CONCURRENCY;
+}
+
+/** Pool size for one process, keeping workers * pool within DB_POOL_TOTAL. */
+export function resolvePoolMax(env: Pick<DbEnv, 'DB_POOL_MAX' | 'DB_POOL_TOTAL'>, workers: number): number {
+  if (env.DB_POOL_MAX !== undefined) return env.DB_POOL_MAX;
+  return workers > 1 ? Math.max(4, Math.floor(env.DB_POOL_TOTAL / workers)) : 20;
 }

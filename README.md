@@ -121,7 +121,10 @@ All configuration is via environment variables, validated at startup (the proces
 | `DATABASE_SSL_MODE` | `disable` | `disable` \| `verify` (TLS + cert verification) \| `no-verify` (explicit opt-in only) |
 | `DATABASE_CA_CERT` | – | PEM CA bundle for `verify` with a private CA |
 | `LISTEN_BACKLOG` | `4096` | HTTP accept-queue size (Node default 511 overflows under connection bursts behind a proxy) |
-| `DB_POOL_MAX` | `20` | Request pool size |
+| `WEB_CONCURRENCY` | `1` (`auto` in compose) | Node processes: `auto` = one cluster worker per CPU core sharing the port; `1` = single process. Correctness does not depend on it (all decisions are in PostgreSQL); `/metrics` is merged across workers |
+| `DB_POOL_MAX` | auto | Connections per process. Unset: 20 for one process, or `DB_POOL_TOTAL ÷ workers` in cluster mode |
+| `DB_POOL_TOTAL` | `160` | Connection budget split across cluster workers (keep below PostgreSQL `max_connections`, 300 in compose) |
+| `METRICS_AGG_PORT` | `9464` | Internal (127.0.0.1) port where the cluster primary merges worker metrics |
 | `DB_POOL_ACQUIRE_TIMEOUT_MS` | `30000` | Max wait for a pool connection before answering `503` |
 | `DB_LOCK_TIMEOUT_MS` | `10000` | PostgreSQL `lock_timeout` (→ `503`, never a hang) |
 | `DB_STATEMENT_TIMEOUT_MS` | `15000` | PostgreSQL `statement_timeout` |
@@ -311,11 +314,14 @@ The concurrency tests were checked for sensitivity by deliberately removing the 
 ```bash
 ./burst.sh <BASE_URL>                                    # e.g. ./burst.sh https://seats.example.com
 ./burst.sh http://localhost:3000 --hot 5000 --concurrency 1000 --same-user 20 --retries 50 --overlap 500
+./burst.sh https://reservation.example.com --stampede 25000 --concurrency 5000   # + on-sale stampede
 ```
 
 Zero dependencies: only Node ≥ 22.18 (runs `scripts/burst.ts` with built-in type stripping). It uses only the public API. Tokens come from `POST /auth/dev-token` (server needs `AUTH_DEV_TOKENS_ENABLED=true`), or set `BURST_JWT_SECRET` (and `BURST_JWT_ISSUER`) to sign tokens locally instead.
 
-Scenarios: (1) hot-seat storm, N distinct users → one seat; (2) one user firing many concurrent requests; (3) concurrent retries with one idempotency key, then same key with a different body; (4) overlapping multi-seat requests in mixed seat order; (5) reconciliation of every show via `GET /shows/:id`. It prints status/reason breakdowns, latency percentiles and server metrics, and exits non-zero if any check fails.
+Scenarios: (1) hot-seat storm, N distinct users → one seat; (2) one user firing many concurrent requests; (3) concurrent retries with one idempotency key, then same key with a different body; (4) overlapping multi-seat requests in mixed seat order; (5) optional **on-sale stampede** (`--stampede N`): one fresh show, ~50% of requests on a few hot seats (`--hot-seats`, default 5), ~30% across the hall (`--hall`, default 500), ~20% exact retries; the show is polled *during* the storm to check the invariant live, and `reservations_confirmed_total` must move by exactly the reservations created; (6) reconciliation of every show via `GET /shows/:id`.
+
+Load is generated from several worker threads (`--workers`, default CPU cores − 1): a single JS thread saturates at a few thousand concurrent HTTPS requests and would measure its own queue instead of the server. It prints status/reason breakdowns, latency percentiles and server metrics, and exits non-zero if any check fails.
 
 Result against `docker compose up` on a laptop (abridged):
 
