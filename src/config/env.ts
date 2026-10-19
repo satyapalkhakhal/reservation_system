@@ -23,7 +23,9 @@ const EnvSchema = z.object({
   // Connections per process. Unset: 20 for a single process, or an equal
   // share of DB_POOL_TOTAL per worker in cluster mode.
   DB_POOL_MAX: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().positive().optional()),
-  DB_POOL_TOTAL: z.coerce.number().int().positive().default(160),
+  // Connection budget across cluster workers. Unset: 5 per worker, between
+  // 20 and 160 (PostgreSQL gains nothing from many more connections than cores).
+  DB_POOL_TOTAL: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().positive().optional()),
   // How long a request may wait for a free pool connection before we answer 503.
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   // Upper bound on waiting for a row lock inside a transaction (hot-seat queue).
@@ -85,8 +87,10 @@ export function resolveWorkers(env: Pick<Env, 'WEB_CONCURRENCY'>, cpus: number):
   return env.WEB_CONCURRENCY === 'auto' ? Math.max(1, cpus) : env.WEB_CONCURRENCY;
 }
 
-/** Pool size for one process, keeping workers * pool within DB_POOL_TOTAL. */
+/** Pool size for one process, keeping workers * pool within the connection budget. */
 export function resolvePoolMax(env: Pick<DbEnv, 'DB_POOL_MAX' | 'DB_POOL_TOTAL'>, workers: number): number {
   if (env.DB_POOL_MAX !== undefined) return env.DB_POOL_MAX;
-  return workers > 1 ? Math.max(4, Math.floor(env.DB_POOL_TOTAL / workers)) : 20;
+  if (workers <= 1) return 20;
+  const total = env.DB_POOL_TOTAL ?? Math.min(160, Math.max(20, workers * 5));
+  return Math.max(4, Math.floor(total / workers));
 }

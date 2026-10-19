@@ -9,9 +9,12 @@
 		# The request was never sent, so this cannot double-book.
 		lb_try_duration 5s
 		transport http {
-			# Reuse upstream connections instead of opening a new one per
-			# request under bursts (Caddy's default keeps only 32 idle).
-			keepalive_idle_conns_per_host 1024
+			# A fixed, reused set of connections to the app. Without a cap, a
+			# burst of 20,000 clients becomes 20,000 new app connections and
+			# throughput collapses; with it, excess requests queue here (cheap
+			# in Go) and the app serves a steady stream.
+			max_conns_per_host 512
+			keepalive_idle_conns_per_host 512
 			# Below Node/Fastify's 72s keep-alive timeout, so Caddy never
 			# reuses a connection the app is about to close.
 			keepalive 60s

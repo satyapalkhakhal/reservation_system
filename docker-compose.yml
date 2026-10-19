@@ -9,9 +9,23 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-reservations}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-password}
       POSTGRES_DB: ${POSTGRES_DB:-reservations}
-    # Budget: DB_POOL_TOTAL (160) for request pools + 2 per worker for
-    # readiness + migrations, with headroom.
-    command: ["postgres", "-c", "max_connections=300"]
+    # Budget: request pools (at most 160) + 2 per worker for readiness +
+    # metrics + migrations, with headroom.
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      # Modest memory settings for a dedicated VM (defaults assume 128 MB).
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_completion_target=0.9
+    # Parallel queries use /dev/shm; Docker's 64 MB default can be too small.
+    shm_size: 256mb
     ports:
       # Host port 55432 (localhost only) to avoid clashing with a local PostgreSQL.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
@@ -36,9 +50,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-reservations}:${POSTGRES_PASSWORD:-local-dev-password}@postgres:5432/${POSTGRES_DB:-reservations}
       # Empty = automatic: 20 for one process, or DB_POOL_TOTAL split across workers.
       DB_POOL_MAX: ${DB_POOL_MAX:-}
-      DB_POOL_TOTAL: ${DB_POOL_TOTAL:-160}
+      # Empty = automatic: 5 per worker, between 20 and 160.
+      DB_POOL_TOTAL: ${DB_POOL_TOTAL:-}
       # One Node worker per CPU core (node:cluster). Set 1 to disable.
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-auto}
+      # How cluster workers get connections: empty/none = each worker accepts
+      # directly; rr = the primary accepts and hands them out.
+      NODE_CLUSTER_SCHED_POLICY: ${NODE_CLUSTER_SCHED_POLICY:-}
       PER_USER_LIMIT: ${PER_USER_LIMIT:-4}
       JWT_SECRET: ${JWT_SECRET:-local-dev-only-jwt-secret-change-me-0000}
       AUTH_DEV_TOKENS_ENABLED: ${AUTH_DEV_TOKENS_ENABLED:-true}

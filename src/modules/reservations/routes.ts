@@ -3,6 +3,7 @@ import { parseOrThrow } from '../../common/utils/validation.js';
 import { DomainError } from '../../common/errors/domain-errors.js';
 import { isDbUnavailable } from '../../common/errors/error-handler.js';
 import { declineReasonFor, type Metrics } from '../../observability/metrics.js';
+import { annotate } from '../../observability/logger.js';
 import { currentUser } from '../auth/middleware.js';
 import { ReservationIdParams, ReserveBody, ReserveParams } from './schemas.js';
 import type { ReservationService } from './service.js';
@@ -32,17 +33,14 @@ export async function reservationRoutes(
       if (reason) {
         metrics.reservationsDeclined.labels(reason).inc();
         endTimer({ outcome: 'declined' });
-        // Expected business outcome: info, not error. The error handler builds the response.
-        request.log.info(
-          {
-            event: 'reservation_declined',
-            reason,
-            show_id: (request.params as { showId?: string }).showId,
-            user_id: user.id,
-            ...(err instanceof DomainError && err.details ? { details: err.details } : {}),
-          },
-          'reservation declined',
-        );
+        // Expected business outcome: logged at info, not error. The error
+        // handler builds the response.
+        annotate(request, {
+          event: 'reservation_declined',
+          reason,
+          show_id: (request.params as { showId?: string }).showId,
+          ...(err instanceof DomainError && err.details ? { details: err.details } : {}),
+        });
       } else {
         endTimer({ outcome: 'error' });
       }
@@ -58,16 +56,12 @@ export async function reservationRoutes(
       metrics.reservationsConfirmed.inc();
       endTimer({ outcome: 'confirmed' });
     }
-    request.log.info(
-      {
-        event: replayed ? 'reservation_idempotent_replay' : 'reservation_confirmed',
-        show_id: showId,
-        user_id: user.id,
-        reservation_id: reservation.reservation_id,
-        seats: reservation.seats,
-      },
-      replayed ? 'idempotent replay' : 'reservation confirmed',
-    );
+    annotate(request, {
+      event: replayed ? 'reservation_idempotent_replay' : 'reservation_confirmed',
+      show_id: showId,
+      reservation_id: reservation.reservation_id,
+      seats: reservation.seats,
+    });
     // A replay returns the original response (same status and body); the header
     // lets clients distinguish it.
     if (replayed) reply.header('Idempotent-Replayed', 'true');
@@ -80,16 +74,12 @@ export async function reservationRoutes(
 
     const reservation = await reservations.cancel(user.id, reservationId);
     metrics.reservationsCancelled.inc();
-    request.log.info(
-      {
-        event: 'reservation_cancelled',
-        show_id: reservation.show_id,
-        user_id: user.id,
-        reservation_id: reservation.reservation_id,
-        seats: reservation.seats,
-      },
-      'reservation cancelled',
-    );
+    annotate(request, {
+      event: 'reservation_cancelled',
+      show_id: reservation.show_id,
+      reservation_id: reservation.reservation_id,
+      seats: reservation.seats,
+    });
     return reservation;
   });
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { parseOrThrow } from '../../common/utils/validation.js';
+import { annotate } from '../../observability/logger.js';
 import { USER_ID_PATTERN, type JwtAuthService } from './service.js';
 
 const DevTokenBody = z.object({
@@ -16,7 +17,7 @@ export async function devTokenRoutes(app: FastifyInstance, opts: { auth: JwtAuth
   app.post('/auth/dev-token', async (request, reply) => {
     const { user_id } = parseOrThrow(DevTokenBody, request.body);
     const token = await opts.auth.issue(user_id);
-    request.log.info({ event: 'dev_token_issued', user_id }, 'dev token issued');
+    annotate(request, { event: 'dev_token_issued', user_id });
     return reply.status(201).send(token);
   });
 }

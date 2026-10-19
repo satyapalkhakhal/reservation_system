@@ -18,6 +18,8 @@ import * as showsRepo from '../shows/repository.js';
 import * as repo from './repository.js';
 import { reservationRequestHash } from './hash.js';
 import type { Reservation, ReservationView } from './types.js';
+import type { Show } from '../shows/types.js';
+import type { Queryable } from '../../db/queryable.js';
 
 export interface ReserveCommand {
   userId: string; // from the verified token, never from the body
@@ -32,8 +34,28 @@ export interface ReserveResult {
   replayed: boolean;
 }
 
+const SHOW_CACHE_MAX = 10_000;
+
 export class ReservationService {
+  /**
+   * Shows are immutable once created (no update/delete endpoint), so price
+   * and per-user limit can be cached per process. Only hits are cached: an
+   * unknown id is always re-checked, so a show created a moment later works.
+   */
+  private readonly showCache = new Map<string, Show>();
+
   constructor(private readonly pool: Pool) {}
+
+  private async getShow(client: Queryable, showId: string): Promise<Show | null> {
+    const cached = this.showCache.get(showId);
+    if (cached) return cached;
+    const show = await showsRepo.findShowById(client, showId);
+    if (show) {
+      if (this.showCache.size >= SHOW_CACHE_MAX) this.showCache.delete(this.showCache.keys().next().value!);
+      this.showCache.set(showId, show);
+    }
+    return show;
+  }
 
   /**
    * THE reservation transaction. All-or-nothing: either every requested seat
@@ -63,7 +85,7 @@ export class ReservationService {
     try {
       return await withTransaction(this.pool, async (client) => {
         // 0. Show price/limit. Shows are immutable once created, so no lock needed.
-        const show = await showsRepo.findShowById(client, cmd.showId);
+        const show = await this.getShow(client, cmd.showId);
         if (!show) throw new ShowNotFoundError(cmd.showId);
 
         // 1. Lock this user's quota row: serializes this user's requests for this show.
