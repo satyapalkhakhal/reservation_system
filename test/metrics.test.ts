@@ -49,10 +49,32 @@ describe('metrics', () => {
     expect(metricValue(after, 'seats_available')).toBe(byStatus.available ?? 0);
     expect(metricValue(after, 'seats_confirmed')).toBe(byStatus.confirmed ?? 0);
     expect(metricValue(after, 'seats_held')).toBe(0);
-    expect(metricValue(after, 'seat_metrics_scrape_success')).toBe(1);
 
     // No high-cardinality identifiers in labels.
     expect(after).not.toMatch(/user_id=|reservation_id=|request_id=|show_id=/);
-    expect(after).toContain('route="/shows/:showId/reserve"');
+    // Responses by class: the 409 declines are 4xx; nothing failed.
+    expect(metricValue(after, 'http_responses_total', '{class="5xx"}')).toBe(0);
+    expect(delta('http_responses_total', '{class="4xx"}')).toBe(3); // conflict, seat taken, per-user limit
+
+    // Only the agreed, human-readable set: no runtime or per-route metrics.
+    const names = new Set(
+      after
+        .split('\n')
+        .filter((l) => l && !l.startsWith('#'))
+        .map((l) => l.replace(/[{ ].*/, '').replace(/_(bucket|sum|count)$/, '')),
+    );
+    expect([...names].sort()).toEqual(
+      [
+        'http_responses_total',
+        'reservation_duration_seconds',
+        'reservations_cancelled_total',
+        'reservations_confirmed_total',
+        'reservations_declined_total',
+        'seats_available',
+        'seats_confirmed',
+        'seats_held',
+        'seats_total',
+      ].sort(),
+    );
   });
 });

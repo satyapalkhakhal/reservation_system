@@ -32,7 +32,6 @@ export async function reservationRoutes(
         err instanceof DomainError ? declineReasonFor(err.code) : isDbUnavailable(err) ? 'unavailable' : undefined;
       if (reason) {
         metrics.reservationsDeclined.labels(reason).inc();
-        endTimer({ outcome: 'declined' });
         // Expected business outcome: logged at info, not error. The error
         // handler builds the response.
         annotate(request, {
@@ -41,21 +40,16 @@ export async function reservationRoutes(
           show_id: (request.params as { showId?: string }).showId,
           ...(err instanceof DomainError && err.details ? { details: err.details } : {}),
         });
-      } else {
-        endTimer({ outcome: 'error' });
       }
       throw err;
+    } finally {
+      endTimer();
     }
 
     const { reservation, replayed } = result;
     const showId = reservation.show_id;
-    if (replayed) {
-      metrics.reservationsDeclined.labels('idempotent_replay').inc();
-      endTimer({ outcome: 'replayed' });
-    } else {
-      metrics.reservationsConfirmed.inc();
-      endTimer({ outcome: 'confirmed' });
-    }
+    if (replayed) metrics.reservationsDeclined.labels('idempotent_replay').inc();
+    else metrics.reservationsConfirmed.inc();
     annotate(request, {
       event: replayed ? 'reservation_idempotent_replay' : 'reservation_confirmed',
       show_id: showId,

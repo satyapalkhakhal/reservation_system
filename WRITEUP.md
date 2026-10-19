@@ -93,17 +93,17 @@ Accepting reservations without the database would mean deciding seat ownership w
 
 ## 7. Observability
 
-**Metrics** (`/metrics`, Prometheus):
+**Metrics** (`/metrics`, Prometheus), kept to what a person can read at a glance:
+- seats: `seats_total`, `seats_available`, `seats_held`, `seats_confirmed`
 - `reservations_confirmed_total`
-- `reservations_declined_total{reason}`, with reasons `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict`, `unknown_seats`, `show_not_found`, `validation`, `unavailable`
+- `reservations_declined_total{reason}`: `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict` (plus `unknown_seats`, `show_not_found`, `validation`, `unavailable` when they occur)
 - `reservations_cancelled_total`
-- `reservation_duration_seconds{outcome}`
-- `http_requests_total` by `{method, route template, status_code}`
-- `db_pool_connections{state=total|idle|waiting}`
+- `http_responses_total{class=2xx|4xx|5xx}`
+- `reservation_duration_seconds` (4 buckets)
 
-Only domain and service-health metrics are exported; generic Node.js runtime metrics (heap, GC, handles) were removed so the relevant ones stand out.
+Generic Node.js runtime metrics and per-route breakdowns were removed so the relevant numbers stand out.
 
-The seat gauges (`seats_available` / `held` / `confirmed` / `total`) are **queried from PostgreSQL at scrape time**. So they reconcile exactly with `GET /shows/:id` summed across shows, across restarts and replicas. Counters are per process, the Prometheus norm, so use `sum(rate(...))`. No identifiers appear as labels.
+The seat gauges are **queried from PostgreSQL at scrape time**, so they reconcile exactly with `GET /shows/:id` summed across shows, across restarts and replicas. In cluster mode the primary merges the workers' counters, so one scrape shows the whole server. No identifiers appear as labels.
 
 **Logs:** JSON lines with `request_id` on every request-scoped line (incoming `X-Request-Id` propagated and echoed back), `event` names (`reservation_confirmed`, `reservation_declined` with `reason`, `reservation_idempotent_replay`, `reservation_cancelled`, `database_unavailable`, `unhandled_error`), and one `http_request` line per request. Expected `409`s log at `info`; only unexpected failures log at `error`. Tokens are redacted.
 
@@ -113,13 +113,12 @@ The seat gauges (`seats_available` / `held` / `confirmed` / `total`) are **queri
 
 | Alert | Condition (5 min) | Why |
 |---|---|---|
-| Unexpected errors | `sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 1%` | 5xx should be ~0; contention is 409 by design |
+| Unexpected errors | `sum(rate(http_responses_total{class="5xx"}[5m])) / sum(rate(http_responses_total[5m])) > 1%` | 5xx should be ~0; contention is 409 by design |
 | Database outage | `/health/ready` failing on all instances, or `reservations_declined_total{reason="unavailable"}` rising | Nobody can book |
 | Booking latency | p99 `reservation_duration_seconds` > 2 s | Pool or lock saturation; users time out |
-| Pool saturation | `db_pool_connections{state="waiting"}` > 0 sustained | Heading towards 503s |
 | **Invariant breach** | any `unhandled_error` log containing `Invariant violated`, or a unique-violation safety net firing | Should be impossible; means a bug in the locking protocol |
 
-Ticket-level, not paging: a spike in `seat_taken` (popular show, expected), `idempotency_conflict` (client bug), or `seat_metrics_scrape_success == 0`.
+Ticket-level, not paging: a spike in `seat_taken` (popular show, expected), `idempotency_conflict` (client bug), or the seat gauges disappearing (database unreachable at scrape time).
 
 ## 8. AI usage
 

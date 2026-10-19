@@ -378,20 +378,18 @@ Thresholds fail the run on any 5xx, any connection failure, or any reservation n
 
 ## Observability
 
-**Metrics** (`GET /metrics`):
+**Metrics** (`GET /metrics`): kept deliberately short (about 45 lines) so a person can read it at a glance, in this order:
 
-| Metric | Type | Notes |
+| Metric | Type | Meaning |
 |---|---|---|
-| `reservations_confirmed_total` | counter | new reservations only |
-| `reservations_declined_total{reason}` | counter | `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict`, `unknown_seats`, `show_not_found`, `validation`, `unavailable` (all pre-initialized to 0) |
-| `reservations_cancelled_total` | counter | |
-| `reservation_duration_seconds{outcome}` | histogram | `confirmed` / `replayed` / `declined` / `error` |
-| `http_requests_total{method,route,status_code}` | counter | for the 5xx-rate alert; `route` is the template (`/shows/:showId/reserve`), never the raw URL; health/metrics probes excluded |
-| `seats_available`, `seats_held`, `seats_confirmed`, `seats_total` | gauge | read from PostgreSQL **at scrape time**: always equal to the sum of `GET /shows/:id` counts across shows, regardless of restarts or replica count |
-| `seat_metrics_scrape_success` | gauge | `0` if the seat gauges could not be read (gauges are then omitted rather than stale) |
-| `db_pool_connections{state}` | gauge | `total` / `idle` / `waiting` |
+| `seats_total`, `seats_available`, `seats_held`, `seats_confirmed` | gauge | Current seat state across all shows, read from PostgreSQL **at scrape time**, so `available + held + confirmed == total` and the numbers always match `GET /shows/:id` (summed). Omitted if the database is unreachable rather than shown stale. |
+| `reservations_confirmed_total` | counter | Bookings made (a retry is not counted again) |
+| `reservations_declined_total{reason}` | counter | Requests that booked nothing new: `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_conflict` (shown from 0); `unknown_seats`, `show_not_found`, `validation`, `unavailable` appear once they happen |
+| `reservations_cancelled_total` | counter | Cancellations (seats released) |
+| `http_responses_total{class}` | counter | API responses by `2xx` / `4xx` / `5xx` (health and metrics probes excluded). `5xx` should stay 0; declines are 4xx |
+| `reservation_duration_seconds` | histogram | Time to answer a reservation; buckets 0.05 s, 0.25 s, 1 s, 5 s |
 
-Only domain and service-health metrics are exported: no generic Node.js runtime metrics. No `user_id`, `reservation_id`, `request_id` or `show_id` labels.
+Nothing else: no Node.js runtime metrics, no per-route breakdowns, and no `user_id`, `reservation_id`, `request_id` or `show_id` labels. In cluster mode the counters are merged across workers, so they reconcile with the API.
 
 **Logs** are JSON lines (pino) with ISO `time`, string `level`, `service`, and `request_id` on every request-scoped line. Domain events carry `event`, `show_id`, `user_id`, `reservation_id`, `seats`:
 

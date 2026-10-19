@@ -2,7 +2,7 @@ import cluster from 'node:cluster';
 import type { FastifyInstance } from 'fastify';
 import type { Metrics } from './metrics.js';
 
-/** Registers the /metrics route and the per-request HTTP counter. */
+/** Registers the /metrics route and the per-response status-class counter. */
 export async function metricsPlugin(
   app: FastifyInstance,
   opts: { metrics: Metrics; aggregatorPort: number },
@@ -10,10 +10,9 @@ export async function metricsPlugin(
   const { metrics, aggregatorPort } = opts;
 
   app.addHook('onResponse', async (request, reply) => {
-    // Route template ("/shows/:showId"), never the raw URL: keeps cardinality bounded.
     const route = request.routeOptions.url ?? 'unmatched';
     if (route === '/metrics' || route === '/health/live' || route === '/health/ready') return; // probe noise
-    metrics.httpTotal.inc({ method: request.method, route, status_code: String(reply.statusCode) });
+    metrics.httpResponses.inc({ class: `${Math.floor(reply.statusCode / 100)}xx` });
   });
 
   app.get('/metrics', async (_request, reply) => {

@@ -74,7 +74,8 @@ function runPrimary(env: Env, workers: number): void {
       Promise.all([aggregator.clusterMetrics(), seatRegistry.metrics()])
         .then(([workers, seats]) => {
           res.writeHead(200, { 'content-type': aggregator.contentType });
-          res.end(`${workers}\n${seats}`);
+          // Seats (current state) first, then what the workers recorded.
+          res.end(`${seats}\n${workers}`);
         })
         .catch((err: unknown) => {
           res.writeHead(500, { 'content-type': 'text/plain' });
