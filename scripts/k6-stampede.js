@@ -70,6 +70,9 @@ export const options = {
     'checks{check:reserve answered 201 or 409}': ['rate==1'],
     // Not a pass/fail bar; makes the summary show reservation latency alone.
     'http_req_duration{name:reserve}': ['max>=0'],
+    // Rate mode: if k6 could not start requests on schedule, the server did
+    // not actually receive the requested rate, so the step does not count.
+    ...(RATE ? { dropped_iterations: ['count==0'] } : {}),
   },
 };
 
