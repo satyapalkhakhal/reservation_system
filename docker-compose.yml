@@ -60,6 +60,8 @@ services:
       PER_USER_LIMIT: ${PER_USER_LIMIT:-4}
       JWT_SECRET: ${JWT_SECRET:-local-dev-only-jwt-secret-change-me-0000}
       AUTH_DEV_TOKENS_ENABLED: ${AUTH_DEV_TOKENS_ENABLED:-true}
+      # User ids allowed to create shows (POST /shows), comma-separated.
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-admin}
     ports:
       - "${APP_HOST_PORT:-3000}:3000"
     # Room for connection bursts (pairs with LISTEN_BACKLOG, default 4096).

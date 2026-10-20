@@ -5,7 +5,7 @@ import { registerErrorHandler } from './common/errors/error-handler.js';
 import { ShowService } from './modules/shows/service.js';
 import { showRoutes } from './modules/shows/routes.js';
 import { JwtAuthService } from './modules/auth/service.js';
-import { requireAuth } from './modules/auth/middleware.js';
+import { requireAdmin, requireAuth } from './modules/auth/middleware.js';
 import { devTokenRoutes } from './modules/auth/routes.js';
 import { ReservationService } from './modules/reservations/service.js';
 import { reservationRoutes } from './modules/reservations/routes.js';
@@ -48,7 +48,7 @@ export async function buildApp({ env, pool, healthPool, logStream }: AppDeps): P
   if (env.AUTH_DEV_TOKENS_ENABLED) {
     await app.register(devTokenRoutes, { auth });
   }
-  await app.register(showRoutes, { shows, authenticate });
+  await app.register(showRoutes, { shows, authenticate, authorizeAdmin: requireAdmin(env.ADMIN_USER_IDS) });
   await app.register(reservationRoutes, { reservations, authenticate, metrics });
 
   return app;

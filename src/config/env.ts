@@ -48,6 +48,11 @@ const EnvSchema = z.object({
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   // Exposes POST /auth/dev-token. Assignment/demo convenience only.
   AUTH_DEV_TOKENS_ENABLED: booleanString.default(false),
+  // User ids (token `sub`) allowed to create shows, comma-separated.
+  ADMIN_USER_IDS: z
+    .string()
+    .default('admin')
+    .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

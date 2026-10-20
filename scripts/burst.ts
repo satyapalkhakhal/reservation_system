@@ -46,6 +46,8 @@ const STAMPEDE = flag('stampede', 0); // total requests in the on-sale stampede 
 const HOT_SEATS = flag('hot-seats', 5);
 const HALL = flag('hall', 500);
 const RUN = randomUUID().slice(0, 8); // unique user ids per run
+// Shows can only be created by an admin user id (server ADMIN_USER_IDS).
+const ADMIN_USER = process.env.BURST_ADMIN_USER ?? 'admin';
 
 /**
  * process.exit() right after console.log can drop the last lines when stdout
@@ -269,7 +271,7 @@ function shuffle<T>(arr: T[]): T[] {
 const seatNames = (n: number) => Array.from({ length: n }, (_, i) => `A${i + 1}`);
 
 async function createShow(name: string, seats: string[], perUserLimit?: number): Promise<string> {
-  const r = await call('POST', '/shows', await token(`burst-admin-${RUN}`), {
+  const r = await call('POST', '/shows', await token(ADMIN_USER), {
     name,
     seats,
     price_paise: 25000,

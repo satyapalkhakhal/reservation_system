@@ -32,6 +32,14 @@ export class UnauthorizedReservationError extends DomainError {
   }
 }
 
+export class AdminRequiredError extends DomainError {
+  readonly statusCode = 403;
+  readonly code = 'FORBIDDEN';
+  constructor() {
+    super('Only admins can create shows');
+  }
+}
+
 export class ShowNotFoundError extends DomainError {
   readonly statusCode = 404;
   readonly code = 'SHOW_NOT_FOUND';

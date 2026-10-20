@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
-import { UnauthenticatedError } from '../../common/errors/domain-errors.js';
+import { AdminRequiredError, UnauthenticatedError } from '../../common/errors/domain-errors.js';
 import type { AuthUser, AuthVerifier } from './types.js';
 
 /** preHandler that requires `Authorization: Bearer <token>` and sets request.authUser. */
@@ -17,4 +17,16 @@ export function requireAuth(verifier: AuthVerifier): preHandlerAsyncHookHandler 
 export function currentUser(request: FastifyRequest): AuthUser {
   if (!request.authUser) throw new UnauthenticatedError('Not authenticated');
   return request.authUser;
+}
+
+/**
+ * preHandler (after requireAuth) that only lets admin user ids through.
+ * Admins are configured by id (ADMIN_USER_IDS); with a real identity provider
+ * this would read a role claim from the token instead.
+ */
+export function requireAdmin(adminUserIds: readonly string[]): preHandlerAsyncHookHandler {
+  const admins = new Set(adminUserIds);
+  return async function authorizeAdmin(request: FastifyRequest, _reply: FastifyReply) {
+    if (!admins.has(currentUser(request).id)) throw new AdminRequiredError();
+  };
 }

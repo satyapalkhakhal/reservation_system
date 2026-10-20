@@ -5,7 +5,7 @@ let h: Harness;
 let token: string;
 beforeAll(async () => {
   h = await startHarness();
-  token = await h.token('organizer');
+  token = await h.token('admin'); // POST /shows is admin-only
 });
 afterAll(async () => {
   await h?.close();
@@ -55,6 +55,18 @@ describe('POST /shows', () => {
   it('requires authentication', async () => {
     const res = await api(h, 'POST', '/shows', { body: { name: 'x', seats: ['A1'], price_paise: 1 } });
     expect(res.status).toBe(401);
+  });
+
+  it('is admin-only: other users get 403 and nothing is created', async () => {
+    const before = await h.pool.query('SELECT count(*)::int AS n FROM shows');
+    const res = await api(h, 'POST', '/shows', {
+      token: await h.token('not-an-admin'),
+      body: { name: 'x', seats: ['A1'], price_paise: 1 },
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    const after = await h.pool.query('SELECT count(*)::int AS n FROM shows');
+    expect(after.rows[0].n).toBe(before.rows[0].n);
   });
 });
 

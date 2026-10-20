@@ -25,7 +25,8 @@
  *
  * Env: BASE_URL (required), JWT_SECRET, JWT_ISSUER (seat-reservation),
  * REQUESTS (25000), VUS (5000), RATE, DURATION (60s), HOT_SEATS (5),
- * HALL (500), RETRY_RATIO (0.2), INSECURE=1 (skip TLS verify; localhost only).
+ * HALL (500), RETRY_RATIO (0.2), ADMIN_USER (admin; creates the show),
+ * INSECURE=1 (skip TLS verify; localhost only).
  */
 import http from 'k6/http';
 import { check } from 'k6';
@@ -45,6 +46,7 @@ const DURATION = __ENV.DURATION || '60s';
 const HOT_SEATS = Number(__ENV.HOT_SEATS || 5);
 const HALL = Number(__ENV.HALL || 500);
 const RETRY_RATIO = Number(__ENV.RETRY_RATIO || 0.2);
+const ADMIN_USER = __ENV.ADMIN_USER || 'admin'; // must be in the server's ADMIN_USER_IDS
 const HOT_SHARE = 0.625; // of new requests; with 20% retries ≈ 50% of all traffic
 
 const scenario = RATE
@@ -114,7 +116,7 @@ export function setup() {
   const res = http.post(
     `${BASE_URL}/shows`,
     JSON.stringify({ name: `k6-stampede-${run}`, seats, price_paise: 25000 }),
-    { headers: { 'content-type': 'application/json', authorization: `Bearer ${tokenFor(`k6-admin-${run}`)}` } },
+    { headers: { 'content-type': 'application/json', authorization: `Bearer ${tokenFor(ADMIN_USER)}` } },
   );
   if (res.status !== 201) throw new Error(`create show failed: HTTP ${res.status} ${res.body}`);
   const showId = res.json('id');
