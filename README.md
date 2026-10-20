@@ -13,8 +13,38 @@ The design rationale (atomic decision point, lock ordering, idempotency, failure
 
 ---
 
+## Live deployment
+
+**`https://reservation.thinkscope.in`**: a GCP Compute Engine VM running this repository's `docker-compose.yml` + `docker-compose.prod.yml` (PostgreSQL 18, the API in cluster mode with one worker per vCPU, and Caddy with a Let's Encrypt certificate).
+
+| | |
+|---|---|
+| Health | [`/health/live`](https://reservation.thinkscope.in/health/live), [`/health/ready`](https://reservation.thinkscope.in/health/ready) |
+| Metrics | [`/metrics`](https://reservation.thinkscope.in/metrics) (about 45 lines: seats, reservations, responses by class, latency) |
+| Tokens | `POST /auth/dev-token {"user_id":"<any id>"}`; use `"admin"` to create shows |
+
+```bash
+URL=https://reservation.thinkscope.in
+./burst.sh $URL --stampede 25000 --concurrency 2000        # correctness under load (run near the server for higher concurrency)
+docker run --rm -i -e BASE_URL=$URL -e REQUESTS=25000 -e VUS=20000 grafana/k6 run - < scripts/k6-stampede.js
+```
+
+**Measured capacity** (k6 from a separate GCP VM in the same region):
+
+| Load | Result |
+|---|---|
+| 25,000 reservations, **20,000 in flight** (5 hot seats, ~20% retries) | ✅ 0 × 5xx, 0 connection errors, p50 0.67 s, hall sold exactly once |
+| **30,000 in flight** | ✅ 0 × 5xx, 0 connection errors |
+| **2,000 reservations/s** sustained for 30 s | ✅ 0 errors, p50 ≈ 30 ms |
+| 3,000 reservations/s | at the limit: still 0 × 5xx, but falls behind the requested rate |
+
+No run produced a 5xx or sold a seat twice, including runs pushed past capacity. Details: [WRITEUP.md §7](WRITEUP.md#7-observability).
+
+---
+
 ## Contents
 
+- [Live deployment](#live-deployment)
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
@@ -44,10 +74,12 @@ The app container waits for PostgreSQL to be healthy, applies migrations, then s
 Try it:
 
 ```bash
+ADMIN=$(curl -s -X POST localhost:3000/auth/dev-token \
+  -H 'content-type: application/json' -d '{"user_id":"admin"}' | jq -r .access_token)
 TOKEN=$(curl -s -X POST localhost:3000/auth/dev-token \
   -H 'content-type: application/json' -d '{"user_id":"user-123"}' | jq -r .access_token)
 
-SHOW=$(curl -s -X POST localhost:3000/shows -H "authorization: Bearer $TOKEN" \
+SHOW=$(curl -s -X POST localhost:3000/shows -H "authorization: Bearer $ADMIN" \
   -H 'content-type: application/json' \
   -d '{"name":"friday-night","seats":["A1","A2","A3","A4"],"price_paise":25000}' | jq -r .id)
 
@@ -133,6 +165,7 @@ All configuration is via environment variables, validated at startup (the proces
 | `JWT_ISSUER` | `seat-reservation` | Required `iss` claim |
 | `JWT_TTL_SECONDS` | `3600` | Lifetime of dev-issued tokens |
 | `AUTH_DEV_TOKENS_ENABLED` | `false` | Expose `POST /auth/dev-token` |
+| `ADMIN_USER_IDS` | `admin` | Comma-separated user ids allowed to create shows (`POST /shows`) |
 | `RUN_MIGRATIONS` | `true` | (Docker entrypoint) run migrations before starting |
 
 ---
@@ -171,7 +204,9 @@ Every write endpoint requires `Authorization: Bearer <token>`. Tokens are HS256 
 - For the assignment, `POST /auth/dev-token {"user_id":"user-123"}` issues a token for any user id. It exists **only** when `AUTH_DEV_TOKENS_ENABLED=true`, and is meant for evaluation and burst testing, not production.
 - Tokens are verified for signature, `alg=HS256` only (no `alg=none`), issuer, expiry, and a well-formed subject. Tokens are redacted from logs.
 
-`POST /shows` requires any authenticated user (roles/admin are out of scope). `GET /shows/:id`, health and metrics are public.
+`POST /shows` is **admin-only**: the token's user id must be in `ADMIN_USER_IDS` (default `admin`); anyone else gets `403 FORBIDDEN`. With a real identity provider this would be a role claim in the token. `GET /shows/:id`, health and metrics are public.
+
+Note: while `AUTH_DEV_TOKENS_ENABLED=true`, anyone can mint a token for any id, including `admin`. That is intended for evaluation; disable it once a real identity provider is in place.
 
 ---
 
@@ -185,13 +220,13 @@ All bodies are JSON. Errors have one shape:
 
 Every response carries `x-request-id` (an incoming well-formed `X-Request-Id` is propagated).
 
-### `POST /shows` (auth)
+### `POST /shows` (admin)
 
 ```json
 { "name": "friday-night", "seats": ["A1", "A2", "A3", "A4"], "price_paise": 25000, "per_user_limit": 4 }
 ```
 
-`per_user_limit` is optional (default `PER_USER_LIMIT`). `price_paise` must be a non-negative **integer**; `250.5` or `"25000"` is a `400`. Seat labels: 1–32 chars of `[A-Za-z0-9_-]`, unique. Returns `201` with the show state (below).
+`per_user_limit` is optional (default `PER_USER_LIMIT`). `price_paise` must be a non-negative **integer**; `250.5` or `"25000"` is a `400`. Seat labels: 1–32 chars of `[A-Za-z0-9_-]`, unique. Returns `201` with the show state (below); `403 FORBIDDEN` if the caller is not in `ADMIN_USER_IDS`.
 
 ### `GET /shows/:showId`
 
