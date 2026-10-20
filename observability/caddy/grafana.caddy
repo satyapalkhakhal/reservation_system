@@ -1,0 +1,5 @@
+# Mounted into the Caddy site block by docker-compose.observability.yml.
+# Grafana serves itself under /grafana/ (GF_SERVER_SERVE_FROM_SUB_PATH).
+handle /grafana* {
+	reverse_proxy grafana:3000
+}

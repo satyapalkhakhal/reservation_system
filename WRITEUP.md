@@ -126,6 +126,8 @@ The seat gauges are **queried from PostgreSQL at scrape time**, so they reconcil
 
 **Health:** liveness = process; readiness = database within 2 s.
 
+**Where to look:** a public, read-only Grafana dashboard at `https://reservation.thinkscope.in/grafana/` shows all of the above live: seats, booking and decline rates, responses by class, booking speed, firing alerts, and the log stream filterable by event or `request_id`. It is backed by Prometheus (5 s scrapes, the alert rules below) and by Loki with Grafana Alloy, which collects the API's logs from Docker. All of it is defined in `docker-compose.observability.yml`, so a clean checkout gets the same dashboard.
+
 **Proven on the live deployment.** Load came from a separate GCP VM in the same region, using Grafana k6 (`scripts/k6-stampede.js`), against `https://reservation.thinkscope.in` (16–32 vCPU, cluster mode):
 
 | Test | Result |

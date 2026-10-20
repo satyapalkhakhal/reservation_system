@@ -20,6 +20,7 @@ The design rationale (atomic decision point, lock ordering, idempotency, failure
 | | |
 |---|---|
 | Health | [`/health/live`](https://reservation.thinkscope.in/health/live), [`/health/ready`](https://reservation.thinkscope.in/health/ready) |
+| **Live dashboard + logs** | [`/grafana/`](https://reservation.thinkscope.in/grafana/d/seat-reservation): public, read-only Grafana with live metrics, alerts and searchable logs |
 | Metrics | [`/metrics`](https://reservation.thinkscope.in/metrics) (about 45 lines: seats, reservations, responses by class, latency) |
 | Tokens | `POST /auth/dev-token {"user_id":"<any id>"}`; use `"admin"` to create shows |
 
@@ -426,6 +427,18 @@ Thresholds fail the run on any 5xx, any connection failure, or any reservation n
 
 Nothing else: no Node.js runtime metrics, no per-route breakdowns, and no `user_id`, `reservation_id`, `request_id` or `show_id` labels. In cluster mode the counters are merged across workers, so they reconcile with the API.
 
+### Live dashboard, logs and alerts (Grafana)
+
+`docker-compose.observability.yml` adds **Prometheus** (scrapes `/metrics` every 5 s, evaluates alert rules), **Loki** plus **Grafana Alloy** (collects the API's JSON logs from Docker), and **Grafana**, served by Caddy at `https://<DOMAIN>/grafana/`. Anyone with the link gets a **read-only** dashboard; editing needs the admin login. Prometheus, Loki and Alloy are internal only.
+
+The dashboard (`observability/grafana/dashboards/reservations.json`) shows:
+- **Right now:** API up/down, seats (total / available / sold), bookings and **5xx** since restart.
+- **Traffic:** reservation outcomes per second (booked / declined by reason), API responses per second by class, seats over time, and the share of reservations answered within 50 ms / 250 ms / 1 s.
+- **Active alerts:** the rules in `observability/prometheus/alerts.yml` (API down, more than 1% 5xx, slow bookings, database unreachable, reservations refused).
+- **Logs:** the API's live log lines, filterable by `event` (e.g. `reservation_declined`) with a free-text search box (e.g. paste a `request_id` from a response's `x-request-id` header).
+
+Logs are kept 7 days, metrics 7 days. Logs and metrics agree: the count of `reservation_confirmed` log lines equals `reservations_confirmed_total`.
+
 **Logs** are JSON lines (pino) with ISO `time`, string `level`, `service`, and `request_id` on every request-scoped line. Domain events carry `event`, `show_id`, `user_id`, `reservation_id`, `seats`:
 
 ```json
@@ -471,6 +484,12 @@ This is how the live instance runs: one VM (e.g. GCP e2-standard-2, Ubuntu 24.04
 4. `curl https://reservation.example.com/health/ready`, then `./burst.sh https://reservation.example.com` from another machine.
 
 To update: `git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`. All containers use `restart: unless-stopped`, so the stack comes back after a VM reboot.
+
+**With the dashboard** (recommended), add `GRAFANA_ADMIN_PASSWORD=<something long>` to `.env` and include the observability overlay in every command:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.observability.yml up -d --build
+```
+Grafana is then at `https://<DOMAIN>/grafana/`. No extra DNS record or port is needed; it shares the domain and certificate.
 
 ### Managed platforms
 

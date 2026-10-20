@@ -4,6 +4,11 @@
 # 80 + 443 must be reachable.
 {$DOMAIN} {
 	encode gzip
+
+	# Optional extra routes; docker-compose.observability.yml mounts
+	# observability/caddy/grafana.caddy here to serve Grafana at /grafana/.
+	# Matches nothing (and changes nothing) without that overlay.
+	import /etc/caddy/extra/*.caddy
 	reverse_proxy app:3000 {
 		# Retry only failures to CONNECT to the app (e.g. during a restart).
 		# The request was never sent, so this cannot double-book.

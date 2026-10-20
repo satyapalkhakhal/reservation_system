@@ -1,0 +1,46 @@
+// Ships the API container's JSON logs to Loki.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Keep only the compose service "app" (the API); label it service="app".
+discovery.relabel "app" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "app"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "app" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.app.output
+  forward_to    = [loki.process.app.receiver]
+  refresh_interval = "10s"
+}
+
+// Lift two small, bounded fields into labels for fast filtering
+// (level: info/warn/error; event: reservation_confirmed, reservation_declined, ...).
+// request_id, user_id etc. stay in the line, searchable with a text filter.
+loki.process "app" {
+  stage.json {
+    expressions = { level = "level", event = "event" }
+  }
+  stage.labels {
+    values = { level = "", event = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -1,0 +1,43 @@
+# The "what pages someone at 2 AM" rules from WRITEUP.md §7.
+# Shown on the Grafana dashboard (Active alerts panel).
+groups:
+  - name: reservation-api
+    rules:
+      - alert: ApiDown
+        expr: up{job="reservation-api"} == 0
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: Reservation API is not answering /metrics
+
+      - alert: High5xxRate
+        expr: |
+          sum(rate(http_responses_total{class="5xx"}[5m]))
+            / clamp_min(sum(rate(http_responses_total[5m])), 1e-9) > 0.01
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: More than 1% of API responses are 5xx (contention should be 409, never 5xx)
+
+      - alert: SlowBookings
+        expr: |
+          sum(rate(reservation_duration_seconds_bucket{le="1"}[5m]))
+            / clamp_min(sum(rate(reservation_duration_seconds_count[5m])), 1e-9) < 0.99
+          and sum(rate(reservation_duration_seconds_count[5m])) > 1
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: Fewer than 99% of reservation requests are answered within 1 second
+
+      - alert: DatabaseUnreachable
+        expr: absent(seats_total) and on() up{job="reservation-api"} == 1
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: API is up but cannot read seat state from PostgreSQL
+
+      - alert: ReservationsUnavailable
+        expr: sum(increase(reservations_declined_total{reason="unavailable"}[5m])) > 0
+        labels: { severity: page }
+        annotations:
+          summary: Reservations are being refused because the database is unavailable
