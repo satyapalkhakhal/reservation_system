@@ -439,6 +439,8 @@ The dashboard (`observability/grafana/dashboards/reservations.json`) shows:
 
 Logs are kept 7 days, metrics 7 days. Logs and metrics agree: the count of `reservation_confirmed` log lines equals `reservations_confirmed_total`.
 
+Access trade-off: the assignment asks for public log access, so the dashboard is open to anonymous viewers. Viewers cannot edit anything, but Grafana also lets them run their own Prometheus/Loki queries, so the whole API log is readable. The logs contain only event names, ids (show, reservation, user, request), seat labels and HTTP fields: tokens are redacted, and request bodies and idempotency keys are never logged. Per-query limits on Loki and Prometheus (30 s timeout, capped entries/samples) keep any single query cheap. Outside an evaluation, put Grafana behind a login (e.g. `basic_auth` in `observability/caddy/grafana.caddy`) or disable anonymous access.
+
 **Logs** are JSON lines (pino) with ISO `time`, string `level`, `service`, and `request_id` on every request-scoped line. Domain events carry `event`, `show_id`, `user_id`, `reservation_id`, `seats`:
 
 ```json

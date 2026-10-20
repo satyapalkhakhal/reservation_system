@@ -34,6 +34,12 @@ limits_config:
   per_stream_rate_limit: 32MB
   per_stream_rate_limit_burst: 64MB
   max_query_series: 5000
+  # The dashboard is public (read-only), and Grafana viewers can send their
+  # own queries: cap what any single query may cost.
+  max_query_length: 24h
+  max_entries_limit_per_query: 1000
+  max_query_parallelism: 8
+  query_timeout: 30s
 
 compactor:
   working_directory: /loki/compactor

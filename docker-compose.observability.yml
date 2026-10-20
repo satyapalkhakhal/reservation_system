@@ -21,6 +21,9 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
+      # Viewers of the public dashboard can send their own queries: bound them.
+      - --query.timeout=30s
+      - --query.max-samples=5000000
     volumes:
       - ./observability/prometheus:/etc/prometheus:ro
       - prometheus_data:/prometheus
@@ -56,6 +59,11 @@ services:
       GF_SERVER_ROOT_URL: https://${DOMAIN:?set DOMAIN in .env}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       # Anyone with the link can view (read-only); editing needs the admin login.
+      # Note: viewers can also run their own Prometheus/Loki queries through
+      # Grafana's query API (bounded by the query limits on both services), so
+      # everything in the API logs is readable. The logs hold no tokens,
+      # idempotency keys or request bodies; for production, put this behind a
+      # login (e.g. basic_auth in observability/caddy/grafana.caddy).
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_AUTH_ANONYMOUS_HIDE_VERSION: "true"
