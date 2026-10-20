@@ -1,8 +1,17 @@
 # Local development / evaluation stack:  docker compose up --build
 # Defaults below are LOCAL-ONLY placeholders; override them via .env
 # (see .env.example). Never reuse them in a real deployment.
+x-logging: &default-logging
+  # Docker keeps container logs forever by default; at ~30 MB of logs per
+  # on-sale burst that filled a 10 GB disk. Rotate: at most 3 x 50 MB each.
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
+    logging: *default-logging
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
@@ -39,6 +48,7 @@ services:
       retries: 30
 
   app:
+    logging: *default-logging
     build: .
     depends_on:
       postgres:

@@ -466,7 +466,7 @@ Any platform that runs a Dockerfile next to a managed PostgreSQL works. Generic 
 
 ### Single VM with HTTPS (Docker Compose + Caddy)
 
-This is how the live instance runs: one VM (e.g. GCP e2-standard-2, Ubuntu 24.04) running PostgreSQL, the API and [Caddy](https://caddyserver.com) via `docker-compose.prod.yml`. Caddy terminates TLS with an automatic Let's Encrypt certificate and forwards to the API over the internal Docker network; PostgreSQL is bound to `127.0.0.1` only.
+This is how the live instance runs: one VM (e.g. GCP e2-highcpu-8 or larger, Ubuntu 24.04, **boot disk ≥ 30 GB**: the 10 GB default fills up with images, database and logs) running PostgreSQL, the API and [Caddy](https://caddyserver.com) via `docker-compose.prod.yml`. Caddy terminates TLS with an automatic Let's Encrypt certificate and forwards to the API over the internal Docker network; PostgreSQL is bound to `127.0.0.1` only.
 
 1. Point a DNS **A record** for your hostname (e.g. `reservation.example.com`) at the VM's static IP.
 2. Open inbound TCP **80 and 443** (GCP: tick *Allow HTTP traffic* and *Allow HTTPS traffic*).

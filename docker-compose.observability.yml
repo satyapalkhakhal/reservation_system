@@ -8,6 +8,14 @@
 # Requires in .env: GRAFANA_ADMIN_PASSWORD (in addition to the prod settings).
 # Only Grafana is reachable from outside (through Caddy); Prometheus, Loki and
 # Alloy stay on the internal network.
+x-logging: &default-logging
+  # Docker keeps container logs forever by default; at ~30 MB of logs per
+  # on-sale burst that filled a 10 GB disk. Rotate: at most 3 x 50 MB each.
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   caddy:
     volumes:
@@ -15,6 +23,7 @@ services:
       - ./observability/caddy:/etc/caddy/extra:ro
 
   prometheus:
+    logging: *default-logging
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     command:
@@ -31,6 +40,7 @@ services:
       - app
 
   loki:
+    logging: *default-logging
     image: grafana/loki:3.7.8
     restart: unless-stopped
     command: ["-config.file=/etc/loki/loki.yml"]
@@ -39,6 +49,7 @@ services:
       - loki_data:/loki
 
   alloy:
+    logging: *default-logging
     image: grafana/alloy:v1.21.0
     restart: unless-stopped
     # Reads container logs through the Docker API (needs the socket, hence
@@ -53,6 +64,7 @@ services:
       - loki
 
   grafana:
+    logging: *default-logging
     image: grafana/grafana:13.2.4
     restart: unless-stopped
     environment:

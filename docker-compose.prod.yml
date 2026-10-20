@@ -5,11 +5,20 @@
 # Requires in .env: DOMAIN (e.g. reservation.example.com), POSTGRES_PASSWORD,
 # JWT_SECRET. The API is no longer published directly; only Caddy listens on
 # 80/443 and forwards to app:3000 over the internal network.
+x-logging: &default-logging
+  # Docker keeps container logs forever by default; at ~30 MB of logs per
+  # on-sale burst that filled a 10 GB disk. Rotate: at most 3 x 50 MB each.
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   app:
     ports: !reset []
 
   caddy:
+    logging: *default-logging
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
